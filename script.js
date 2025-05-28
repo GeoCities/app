@@ -138,7 +138,18 @@ function resetToDefaultThemeColors() {
     if (textColorPicker) textColorPicker.value = defaults.text;
     if (borderColorPicker) borderColorPicker.value = defaults.border;
     
+    // Remove any custom color styles
+    const customStyleEl = document.getElementById('custom-color-styles');
+    if (customStyleEl) {
+        customStyleEl.textContent = '';
+    }
+    
     // Update CSS variables directly
+    document.documentElement.style.removeProperty('--background-color');
+    document.documentElement.style.removeProperty('--primary-color');
+    document.documentElement.style.removeProperty('--border-color');
+    
+    // Re-apply default theme colors without !important
     document.documentElement.style.setProperty('--background-color', defaults.background);
     document.documentElement.style.setProperty('--primary-color', defaults.text);
     document.documentElement.style.setProperty('--border-color', defaults.border);
@@ -158,8 +169,11 @@ function toggleTheme() {
     // Reset to default theme colors
     resetToDefaultThemeColors();
     
-    // Reset all effects
+    // Reset all effects and ensure effect select is set to 'none'
     removeAllEffects();
+    if (effectSelect) {
+        effectSelect.value = 'none';
+    }
     
     // If there's a default avatar, regenerate it with the new theme colors
     const navLogoImg = document.getElementById('nav-logo-img');
@@ -182,27 +196,55 @@ function applyCustomStyles(e) {
     // Update only the specific CSS variable that changed
     const target = e?.target || event?.target;
     if (target) {
-        switch(target.id) {
-            case 'bg-color':
-                document.documentElement.style.setProperty('--background-color', bgColorPicker.value);
-                break;
-            case 'text-color':
-                document.documentElement.style.setProperty('--primary-color', textColorPicker.value);
-                break;
-            case 'border-color':
-                document.documentElement.style.setProperty('--border-color', borderColorPicker.value);
-                break;
+        // Create a style element to override theme variables with !important
+        let customStyleEl = document.getElementById('custom-color-styles');
+        if (!customStyleEl) {
+            customStyleEl = document.createElement('style');
+            customStyleEl.id = 'custom-color-styles';
+            document.head.appendChild(customStyleEl);
         }
+        
+        // Get current values
+        const bgColor = bgColorPicker.value;
+        const textColor = textColorPicker.value;
+        const borderColor = borderColorPicker.value;
+        
+        // Apply the styles with !important to override theme settings
+        customStyleEl.textContent = `
+            :root {
+                --background-color: ${bgColor} !important;
+                --primary-color: ${textColor} !important;
+                --border-color: ${borderColor} !important;
+            }
+            body {
+                background-color: ${bgColor} !important;
+                color: ${textColor} !important;
+            }
+            .nav-bar, .profile-records, .footer, .search-container, .search-input, 
+            .search-button, #theme-toggle, .profile-record, .profile-header-image, 
+            .download-website-container, .control-button, #follow-button, .follow-button,
+            .download-website-button, .deploy-website-button, .connect-website-button,
+            .effect-select, #effect-select, .effect-control, select, option {
+                background-color: ${bgColor} !important;
+                color: ${textColor} !important;
+                border-color: ${borderColor} !important;
+            }
+        `;
+        
+        // Also update the CSS variables as a fallback
+        document.documentElement.style.setProperty('--background-color', bgColor, 'important');
+        document.documentElement.style.setProperty('--primary-color', textColor, 'important');
+        document.documentElement.style.setProperty('--border-color', borderColor, 'important');
     }
     
     // If there's an ENS name with no avatar, regenerate the default avatar with new colors
     const navLogoImg = document.getElementById('nav-logo-img');
     if (navLogoImg && navLogoImg.dataset.isDefaultAvatar === 'true') {
-        const firstLetter = navLogoImg.dataset.letter || '?';
-        const defaultAvatar = createDefaultAvatar(firstLetter);
-        setAvatar(defaultAvatar);
+        // Use the originalLetter property that was set in setAvatar function
+        const originalLetter = navLogoImg.dataset.originalLetter || '?';
+        const defaultAvatar = createDefaultAvatar(originalLetter);
+        setAvatar(defaultAvatar, originalLetter);
         navLogoImg.dataset.isDefaultAvatar = 'true';
-        navLogoImg.dataset.letter = firstLetter;
     }
 }
 
@@ -299,7 +341,7 @@ function addSnowEffect() {
             position: absolute;
             width: ${size}px;
             height: ${size}px;
-            background: var(--primary-color);
+            background: #ffffff; /* Always white, regardless of text color */
             border-radius: 50%;
             pointer-events: none;
             animation: snowFall ${Math.random() * 5 + 10}s linear infinite;
@@ -1389,6 +1431,10 @@ async function fetchProfile(query) {
     try {
         showLoading();
         hideError();
+        
+        // Reset avatar to default while loading the new profile
+        // This prevents the old avatar from remaining visible during loading
+        setAvatar(DEFAULT_AVATAR);
         
         // Remove any existing register button container
         const existingRegisterContainer = document.querySelector('.register-container');
