@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ENS_NAME_TITLE_PLACEHOLDER</title>
+    <link rel="icon" href="FAVICON_SRC_PLACEHOLDER" type="image/x-icon">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Georgia&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        :root {
+            /* Default variables that will be replaced by THEME_CSS_VARIABLES_PLACEHOLDER */
+            --primary-color: #ffffff;
+            --background-color: #000000;
+            --border-color: #ffffff;
+            --font-main: sans-serif;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--background-color);
+            color: var(--primary-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px 0 80px;
+            transition: background 0.3s ease, color 0.3s ease;
+            position: relative;
+            width: 100%;
+            overflow-x: hidden;
+        }
+
+        .nav-bar {
+            width: 90%;
+            max-width: 1200px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            margin: 20px auto;
+        }
+        
+        /* Nav buttons container */
+        .nav-buttons {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        /* Follow button */
+        .follow-button {
+            padding: 8px 15px;
+            background: var(--background-color);
+            color: var(--primary-color);
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            height: 38px;
+            font-size: 0.9em;
+            box-sizing: border-box;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* No hover effect for follow button */
+        .follow-button:hover {
+            opacity: 1;
+        }
+
+        .nav-logo {
+            width: 80px;
+            height: 80px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            color: var(--primary-color);
+            cursor: pointer;
+        }
+
+        .nav-logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .profile-container {
+            width: 420px;
+            max-width: 90%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 40px auto;
+        }
+
+        .profile-header-image {
+            width: 100%;
+            height: 0;
+            padding-bottom: 33.33%;
+            border: 1px solid var(--border-color);
+            box-sizing: border-box;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 0;
+            display: block;
+        }
+
+        .profile-header-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .profile-records {
+            width: 100%;
+            border: 1px solid var(--border-color);
+            box-sizing: border-box;
+            background-color: var(--background-color);
+        }
+
+        .profile-record {
+            padding: 15px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+        }
+
+        .profile-record:last-child {
+            border-bottom: none;
+        }
+
+        .record-label {
+            font-weight: bold;
+            min-width: 100px;
+            padding-right: 10px;
+        }
+
+        .record-value {
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .record-value a {
+            color: inherit;
+            text-decoration: underline;
+        }
+
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 38px;
+            background: var(--background-color);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .footer a {
+            color: inherit;
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            display: none;
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Error message */
+        .error-message {
+            display: none;
+            color: #ff0000;
+            text-align: center;
+            margin: 10px auto;
+            padding: 10px;
+            max-width: 450px;
+            border: 1px solid #ff0000;
+            background-color: rgba(255, 0, 0, 0.1);
+        }
+
+        /* Loading text styling */
+        .loading-text {
+            opacity: 0.7;
+            font-style: italic;
+        }
+
+        /* Social links container */
+        #social_links_container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            width: 100%;
+        }
+
+        .social-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .profile-container {
+                width: 95%;
+            }
+        }
+
+        /* EFFECT_STYLES_PLACEHOLDER */
+        
+        /* Single Rainbow Effect Definition - No Dynamic Generation */
+        @keyframes rainbowBorder {
+            0% { border-color: #ff0000; }
+            16.666% { border-color: #ff8000; }
+            33.333% { border-color: #ffff00; }
+            50% { border-color: #00ff00; }
+            66.666% { border-color: #0000ff; }
+            83.333% { border-color: #8000ff; }
+            100% { border-color: #ff0000; }
+        }
+        
+        /* Elements will start with no animation, it will be applied via JavaScript */
+        .nav-logo, .profile-records, .profile-record, .profile-header-image, 
+        .footer, .follow-button, .profile-record hr {
+            /* No animation by default */
+            border-color: var(--border-color);
+        }
+        
+        /* Class to apply rainbow effect */
+        .rainbow-active {
+            animation: rainbowBorder 3s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav-bar">
+        <a href="#" class="nav-logo" onclick="window.location.reload()">
+            <img src="AVATAR_SRC_PLACEHOLDER" alt="ENS_NAME_TITLE_PLACEHOLDER" id="nav-logo-img">
+        </a>
+        <div class="nav-buttons">
+            <a href="https://efp.app/ENS_NAME_TITLE_PLACEHOLDER" target="_blank" rel="noopener noreferrer" id="follow-button" class="follow-button">Follow</a>
+        </div>
+    </nav>
+
+    <div class="profile-container">
+        <div class="loading-spinner"></div>
+        <div class="error-message"></div>
+        <div class="profile-records">
+            <div class="profile-record">
+                <div class="record-label">Name:</div>
+                <div class="record-value">ENS_NAME_TITLE_PLACEHOLDER</div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <a href="https://geocities.eth.link" target="_blank" rel="noopener noreferrer">GeoCities</a>
+    </footer>
+
+    <script>
+        // Constants
+        const API_BASE_URL = 'https://api.web3.bio';
+        const DEFAULT_AVATAR = 'https://raw.githubusercontent.com/GeoCities/Ads/main/Ads/Nyan%20Cat%20-%20GeoCities.gif';
+        const ENS_NAME = 'ENS_NAME_TITLE_PLACEHOLDER';
+
+        // Utility functions
+        function showLoading() {
+            document.querySelector('.loading-spinner').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.querySelector('.loading-spinner').style.display = 'none';
+        }
+
+        function showError(message) {
+            const errorElement = document.querySelector('.error-message');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+
+        function hideError() {
+            document.querySelector('.error-message').style.display = 'none';
+        }
+
+        function setAvatar(avatarUrl) {
+            const navLogo = document.querySelector('.nav-logo img');
+            const favicon = document.querySelector('link[rel="icon"]');
+            
+            const url = avatarUrl || DEFAULT_AVATAR;
+            if (navLogo) navLogo.src = url;
+            if (favicon) favicon.href = url;
+        }
+
+        function addRecord(label, value, isLink = false, href = '', elementId = null) {
+            const recordsContainer = document.querySelector('.profile-records');
+            if (!recordsContainer) return;
+            
+            const record = document.createElement('div');
+            record.className = 'profile-record';
+            
+            const labelElement = document.createElement('div');
+            labelElement.className = 'record-label';
+            labelElement.textContent = label;
+            
+            const valueElement = document.createElement('div');
+            valueElement.className = 'record-value';
+            
+            // Set ID if provided for dynamic updates
+            if (elementId) {
+                valueElement.id = elementId;
+            }
+            
+            if (isLink) {
+                const link = document.createElement('a');
+                link.href = href || (value.startsWith('http') ? value : `https://${value}`);
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = value;
+                valueElement.appendChild(link);
+            } else {
+                valueElement.textContent = value;
+            }
+            
+            record.appendChild(labelElement);
+            record.appendChild(valueElement);
+            recordsContainer.appendChild(record);
+            
+            return valueElement; // Return the value element for reference
+        }
+
+        function normalizeUrl(url) {
+            if (!url) return '';
+            url = url.trim();
+            if (!/^https?:\/\//i.test(url)) {
+                return 'https://' + url;
+            }
+            return url;
+        }
+        
+        // Function to fetch followers/following data from ethfollow.xyz API
+        async function fetchEthFollowData(ensName) {
+            try {
+                console.log(`Fetching ethfollow data for ${ensName}...`);
+                
+                // Make the API call to ethfollow.xyz
+                const response = await fetch(`https://api.ethfollow.xyz/api/v1/users/${ensName}/stats`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Ethfollow data:', data);
+                    
+                    // Add followers and following counts to the profile
+                    addRecord('Followers', data.followers_count || '0');
+                    addRecord('Following', data.following_count || '0');
+                    
+                    return data;
+                } else {
+                    console.warn(`Ethfollow API returned status ${response.status}`);
+                    return null;
+                }
+            } catch (error) {
+                console.error('Error fetching ethfollow data:', error);
+                return null;
+            }
+        }
+
+        // Function to apply rainbow effect to all elements immediately
+        function applyRainbowEffect() {
+            console.log('Applying rainbow effect immediately');
+            
+            // Apply to all elements at once
+            const elements = document.querySelectorAll('.nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .profile-record hr');
+            elements.forEach(el => {
+                el.classList.add('rainbow-active');
+            });
+        }
+        
+        // Function to check URL parameters for effects
+        function checkForEffects() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const effect = urlParams.get('effect');
+            
+            if (effect === 'rainbow') {
+                // Don't apply immediately, wait for profile to load
+                window.pendingEffect = 'rainbow';
+            }
+        }
+        
+        // Main function to initialize profile data
+        async function loadProfile() {
+            try {
+                showLoading();
+                hideError();
+                
+                // Clear existing records
+                const recordsContainer = document.querySelector('.profile-records');
+                if (recordsContainer) {
+                    recordsContainer.innerHTML = '';
+                }
+                
+                // Fetch profile data from web3.bio API
+                const url = ENS_NAME.endsWith('.base.eth') ? 
+                    `${API_BASE_URL}/profile/basenames/${ENS_NAME}` :
+                    `${API_BASE_URL}/profile/ens/${ENS_NAME}`;
+                    
+                // Also determine the ethfollow.xyz API endpoint
+                const ethFollowUrl = `https://api.ethfollow.xyz/api/v1/users/${ENS_NAME}/stats`;
+                
+                // Initialize ethfollow data with default values
+                let ethFollowData = { followers_count: '0', following_count: '0' };
+                
+                // Try to fetch ethfollow data (but don't fail if this API is unavailable)
+                try {
+                    const ethFollowResponse = await fetch(ethFollowUrl);
+                    if (ethFollowResponse.ok) {
+                        ethFollowData = await ethFollowResponse.json();
+                        console.log('Ethfollow data fetched successfully:', ethFollowData);
+                    } else {
+                        console.warn('Ethfollow API returned non-OK response:', ethFollowResponse.status);
+                    }
+                } catch (ethFollowError) {
+                    console.warn('Could not fetch ethfollow data:', ethFollowError);
+                    // Continue with default values if ethfollow API fails
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch profile data: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Update avatar - dynamically fetched from the API
+                if (data.avatar) {
+                    setAvatar(data.avatar);
+                } else {
+                    // Create default avatar based on first letter
+                    const firstLetter = ENS_NAME.charAt(0);
+                    setAvatar(DEFAULT_AVATAR);
+                }
+                
+                // Add header image if available
+                if (data.header) {
+                    const profileContainer = document.querySelector('.profile-container');
+                    const headerContainer = document.createElement('div');
+                    headerContainer.className = 'profile-header-image';
+                    const headerImg = document.createElement('img');
+                    headerImg.src = data.header;
+                    headerImg.alt = `${ENS_NAME} header`;
+                    headerContainer.appendChild(headerImg);
+                    
+                    // Insert header at the beginning of profile container
+                    profileContainer.insertBefore(headerContainer, profileContainer.firstChild);
+                }
+                
+                // Add records in specific order matching the main GeoCities site
+                
+                // 1. Identity (ENS/Basename)
+                const isBase = ENS_NAME.endsWith('.base.eth');
+                addRecord(isBase ? 'Basename' : 'ENS', ENS_NAME);
+
+                // 2. Display Name (if different from ENS)
+                if (data.displayName && data.displayName !== ENS_NAME) {
+                    addRecord('Name', data.displayName);
+                }
+
+                // 3. Followers/Following from ethfollow.xyz API
+                addRecord('Followers', ethFollowData.followers_count || '0');
+                addRecord('Following', ethFollowData.following_count || '0');
+
+                // 4. Location
+                if (data.location) {
+                    addRecord('Location', data.location);
+                }
+
+                // 5. Status
+                if (data.status) {
+                    addRecord('Status', data.status);
+                }
+
+                // 6. Bio (Description)
+                if (data.description) {
+                    addRecord('Bio', data.description);
+                } else if (data.bio) {
+                    addRecord('Bio', data.bio);
+                }
+
+                // 7. Email
+                if (data.email) {
+                    addRecord('Email', data.email, true, `mailto:${data.email}`);
+                }
+
+                // 8. Website
+                if (data.links?.website?.handle) {
+                    const url = data.links.website.link || normalizeUrl(data.links.website.handle);
+                    addRecord('Website', data.links.website.handle, true, url);
+                }
+
+                // 9. Social Links with specific platform order
+                if (data.links) {
+                    // Define platform order to match main site
+                    const platformOrder = [
+                        'twitter', 'farcaster', 'lens', 'github', 'discord', 
+                        'telegram', 'nostr', 'mastodon', 'bsky', 'instagram'
+                    ];
+                    
+                    // Sort platforms based on predefined order
+                    const sortedPlatforms = Object.entries(data.links)
+                        .filter(([platform]) => platform !== 'website')
+                        .sort((a, b) => {
+                            const indexA = platformOrder.indexOf(a[0]);
+                            const indexB = platformOrder.indexOf(b[0]);
+                            // If both platforms are in the order list, sort by their position
+                            if (indexA !== -1 && indexB !== -1) {
+                                return indexA - indexB;
+                            }
+                            // If only one platform is in the order list, prioritize it
+                            if (indexA !== -1) return -1;
+                            if (indexB !== -1) return 1;
+                            // If neither platform is in the order list, sort alphabetically
+                            return a[0].localeCompare(b[0]);
+                        });
+                        
+                    sortedPlatforms.forEach(([platform, linkData]) => {
+                        if (linkData.handle) {
+                            // Special label formatting for certain platforms
+                            let label = '';
+                            let url = '';
+
+                            // Determine label and URL based on platform
+                            switch (platform) {
+                                case 'twitter':
+                                    label = 'Twitter';
+                                    url = `https://x.com/${linkData.handle}`;
+                                    break;
+                                case 'github':
+                                    label = 'GitHub';
+                                    url = `https://github.com/${linkData.handle}`;
+                                    break;
+                                case 'discord':
+                                    label = 'Discord';
+                                    url = `https://discord.com/users/${linkData.handle}`;
+                                    break;
+                                case 'telegram':
+                                    label = 'Telegram';
+                                    url = `https://t.me/${linkData.handle}`;
+                                    break;
+                                case 'farcaster':
+                                    label = 'Farcaster';
+                                    url = `https://warpcast.com/${linkData.handle}`;
+                                    break;
+                                case 'lens':
+                                    label = 'Lens';
+                                    url = `https://hey.xyz/u/${linkData.handle}`;
+                                    break;
+                                default:
+                                    label = platform.charAt(0).toUpperCase() + platform.slice(1);
+                                    url = linkData.link || normalizeUrl(linkData.handle);
+                            }
+                            
+                            // Add each social link as a separate record
+                            addRecord(label, linkData.handle, true, url);
+                        }
+                    });    
+                }
+                
+                // 10. Created date (last item)
+                if (data.createdAt) {
+                    let formattedDate = data.createdAt;
+                    try {
+                        const date = new Date(data.createdAt);
+                        if (!isNaN(date.getTime())) {
+                            formattedDate = date.toLocaleDateString('en-US', {
+                                month: '2-digit',
+                                day: '2-digit',
+                                year: 'numeric'
+                            });
+                        }
+                    } catch (err) {}
+                    addRecord('Created', formattedDate);
+                }
+                
+                // Update the follow button to link to ethfollow.xyz
+                const followButton = document.getElementById('follow-button');
+                if (followButton) {
+                    followButton.href = `https://efp.app/${ENS_NAME}`;
+                }
+                
+                // Apply rainbow effect regardless of images loading
+                // This simplified approach will just apply the effect after profile data is loaded
+                applyRainbowEffect();
+                
+                // Hide loading spinner after everything is loaded
+                hideLoading();
+            } catch (error) {
+                console.error('Error loading profile:', error);
+                hideLoading();
+                showError(`Error loading profile: ${error.message}`);
+            }
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Always apply rainbow effect for downloaded files
+            window.pendingEffect = 'rainbow';
+            
+            // Initialize the profile
+            loadProfile();
+        });
+        
+        // EFFECT_INIT_CODE_PLACEHOLDER
+    </script>
+</body>
+</html>

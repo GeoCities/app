@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' 'unsafe-eval';
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src 'self' https://fonts.gstatic.com;
+        img-src 'self' data: https: http:;
+        connect-src 'self' https://api.web3.bio https://raw.githubusercontent.com;
+        object-src 'none';
+        base-uri 'self';
+        form-action 'none';
+    ">
+    <title>GeoCities</title>
+    <link rel="icon" id="favicon" href="" type="image/x-icon">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Georgia&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="GeoCities">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+</head>
+<body>
+    <nav class="nav-bar">
+        <a href="#" class="nav-logo">
+            <img id="nav-logo-img" src="" alt="GeoCities Logo">
+        </a>
+        <div class="nav-buttons">
+            <a href="https://efp.app/geocities.eth" target="_blank" rel="noopener noreferrer" id="follow-button" class="follow-button">Follow</a>
+            <button id="theme-toggle">Light</button>
+        </div>
+    </nav>
+    <div class="container">
+        <h1 id="homepage-geocities">GeoCities</h1>
+        <div class="search-container">
+            <input type="text" class="search-input" placeholder="Enter ENS or Basename">
+            <button class="search-button">Search</button>
+        </div>
+    </div>
+    <div class="loading-spinner"></div>
+    <div class="error-message"></div>
+    <div id="profile-page">
+        <div class="search-container">
+            <input type="text" class="search-input" placeholder="Enter ENS or Basename">
+            <button class="search-button">Search</button>
+        </div>
+
+        <div class="profile-container">
+            <div class="profile-header-image">
+                <!-- Header image will be inserted here -->
+            </div>
+            <div class="profile-records">
+                <!-- ENS records will be inserted here -->
+            </div>
+            <div class="download-website-container">
+                <!-- Control Panel Buttons -->
+                <label class="control-button bg-control">
+                    <input type="color" id="bg-color" class="color-picker" title="Background">
+                    <span class="button-text">Background</span>
+                </label>
+                <label class="control-button text-control">
+                    <input type="color" id="text-color" class="color-picker" title="Text">
+                    <span class="button-text">Text</span>
+                </label>
+                <label class="control-button border-control">
+                    <input type="color" id="border-color" class="color-picker" title="Border">
+                    <span class="button-text">Border</span>
+                </label>
+                <div class="control-button effect-control">
+                    <select id="effect-select" class="effect-select">
+                        <option value="none">Effect</option>
+                        <option value="glow">Glow</option>
+                        <option value="snow">Snow</option>
+                        <option value="stars">Stars</option>
+                        <option value="rainbow">Rainbow</option>
+                        <option value="matrix">Matrix</option>
+                        <option value="neon">Neon</option>
+                        <option value="vaporware">Vaporware</option>
+                    </select>
+                </div>
+                <!-- Website Buttons -->
+
+                <a href="#" class="download-website-button">Download Website</a>
+                <a href="https://hashvault.xyz" target="_blank" rel="noopener noreferrer" class="deploy-website-button">Deploy Website</a>
+                <a class="connect-website-button">Connect Website</a>
+            </div>
+        </div>
+    </div>
+    <footer class="footer">
+        <a href="https://geocities.eth.link" target="_blank" rel="noopener noreferrer">GeoCities</a>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
