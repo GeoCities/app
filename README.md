@@ -24,7 +24,7 @@ Ethereum Name Service (ENS) is a decentralized naming system on the Ethereum blo
 ## Decentralized Hosting with IPFS
 
 InterPlanetary File System (IPFS) is a peer-to-peer protocol for storing and sharing content. Unlike traditional web hosting, where a single server can be shut down, IPFS distributes your website across a global network of nodes. When you deploy your GeoCities website:
-- Your site’s HTML, CSS, and JS are uploaded to IPFS via services like Web3Hash or Pinata, creating a unique Content Identifier (CID).
+- Your site’s HTML, CSS, and JS are uploaded to IPFS via services like WebHash or Pinata, creating a unique Content Identifier (CID).
 - The CID is linked to your ENS name, ensuring your site is accessible via `yourname.eth`.
 - Anyone can access your site as long as at least one node in the IPFS network has a copy—no central point of failure.
 
