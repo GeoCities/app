@@ -239,6 +239,187 @@ h1#homepage-geocities {
     gap: 10px;
 }
 
+/* Dropdown styles */
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    right: 0;
+    background-color: var(--background-color);
+    min-width: 250px;
+    border: 1px solid var(--border-color);
+    z-index: 10;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+}
+
+.dropdown-content.show {
+    display: block;
+}
+
+.dropdown-section {
+    padding: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Control the order of dropdown sections using heading text */
+.dropdown-section h4:contains('ENS/Basename') {
+    order: 1 !important;
+}
+
+.dropdown-section h4:contains('Design') {
+    order: 2 !important;
+}
+
+.dropdown-section h4:contains('Website') {
+    order: 3 !important;
+}
+
+.dropdown-section h4:contains('EFP') {
+    order: 4 !important;
+}
+
+/* Alternative approach using direct targeting */
+#settings-dropdown-content .dropdown-section:nth-of-type(3) {
+    order: 1 !important; /* Move ENS/Basename to top */
+}
+
+#settings-dropdown-content .dropdown-section:nth-of-type(1) {
+    order: 2 !important; /* Move Design to second */
+}
+
+#settings-dropdown-content .dropdown-section:nth-of-type(2) {
+    order: 3 !important; /* Move Website to third */
+}
+
+#settings-dropdown-content .dropdown-section:nth-of-type(4) {
+    order: 4 !important; /* Keep EFP at bottom */
+}
+
+.dropdown-section:last-child {
+    border-bottom: none;
+}
+
+.dropdown-section h4 {
+    margin: 0 0 10px 0;
+    color: var(--primary-color);
+}
+
+.dropdown-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.dropdown-button {
+    display: block;
+    padding: 8px 10px;
+    text-decoration: none;
+    color: var(--primary-color);
+    background-color: var(--background-color);
+    border: 1px solid var(--border-color);
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.dropdown-button:hover {
+    opacity: 0.8;
+}
+
+.dropdown-controls-col {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+/* Dropdown styles */
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-btn {
+    padding: 8px 15px;
+    background: var(--background-color);
+    color: var(--primary-color);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    height: 38px;
+    font-size: 0.9em;
+    box-sizing: border-box;
+    white-space: nowrap;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dropdown-content {
+    display: none;
+    position: absolute;
+    right: 0;
+    background-color: var(--background-color);
+    width: 200px;
+    max-width: 90vw;
+    border: 1px solid var(--border-color);
+    z-index: 1000;
+    padding: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.dropdown-content.show {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+.dropdown-section {
+    margin-bottom: 15px;
+}
+
+.dropdown-section:last-child {
+    margin-bottom: 0;
+}
+
+.dropdown-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 0.9em;
+    color: var(--primary-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 5px;
+}
+
+.dropdown-controls-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 0;
+    padding: 0 6px;
+}
+
+.dropdown-controls-col .control-button,
+.dropdown-controls-col .effect-control {
+    width: 100%;
+    min-width: 40px;
+    margin-bottom: 0;
+    height: 32px;
+}
+
+.dropdown-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 6px;
+}
+
+/* This class definition has been moved to line ~930 */
+
 /* Theme toggle button and Follow button */
 #theme-toggle, .follow-button {
     padding: 8px 15px;
@@ -323,7 +504,7 @@ h1#homepage-geocities {
 .color-button,
 .effect-select {
     width: 105px;
-    height: 38px;
+    height: 32px;
     position: relative;
     border: 1px solid var(--border-color);
     background: var(--background-color);
@@ -357,26 +538,19 @@ h1#homepage-geocities {
 
 .effect-select {
     width: 100%;
-    height: 38px;
+    height: 32px;
     padding: 0 30px 0 10px;
     background: var(--background-color);
     color: var(--primary-color);
     border: 1px solid var(--border-color);
-    box-sizing: border-box;
-    font-size: 0.9em;
-    cursor: pointer;
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='currentColor' d='M2 4h8L6 8z'/%3E%3C/svg%3E");
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
     background-repeat: no-repeat;
-    background-position: right 10px center;
-    line-height: 36px;
-    text-align: center;
-    text-align-last: center;
-    -moz-text-align-last: center;
-    -webkit-text-align-last: center;
-    margin: 0;
+    background-position: right 5px center;
+    font-size: 0.9em;
     display: block;
     border-radius: 0;
 }
@@ -696,13 +870,13 @@ h1#homepage-geocities {
 }
 
 @keyframes rainbowBorder {
-    0% { border-color: #ff0000; }
-    16.666% { border-color: #ff8000; }
-    33.333% { border-color: #ffff00; }
-    50% { border-color: #00ff00; }
-    66.666% { border-color: #0000ff; }
-    83.333% { border-color: #8000ff; }
-    100% { border-color: #ff0000; }
+    0% { border-color: #ff0000 !important; }
+    16.666% { border-color: #ff8000 !important; }
+    33.333% { border-color: #ffff00 !important; }
+    50% { border-color: #00ff00 !important; }
+    66.666% { border-color: #0000ff !important; }
+    83.333% { border-color: #8000ff !important; }
+    100% { border-color: #ff0000 !important; }
 }
 
 @keyframes matrixFall {
@@ -772,17 +946,14 @@ h1#homepage-geocities {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 8px 15px;
-    background: var(--background-color);
-    color: var(--primary-color);
+    position: relative;
+    width: 105px;
+    height: 32px;
     border: 1px solid var(--border-color);
+    background-color: var(--background-color);
+    color: var(--primary-color);
     cursor: pointer;
-    transition: all 0.3s ease;
-    font-size: 0.9em;
-    text-align: center;
-    margin: 5px auto;
-    width: 200px;
-    height: 36px;
+    margin-bottom: 0;
     box-sizing: border-box;
 }
 
@@ -839,6 +1010,26 @@ h1#homepage-geocities {
     line-height: 20px;
 }
 
+/* Dropdown button styles */
+.dropdown-button {
+    padding: 0 15px;
+    background: var(--background-color);
+    color: var(--primary-color);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    font-size: 0.9em;
+    transition: all 0.3s ease;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    height: 32px;
+}
+
 /* Error message styles */
 .error-message {
     display: none;
@@ -849,4 +1040,42 @@ h1#homepage-geocities {
     max-width: 450px;
     border: 1px solid #ff0000;
     background-color: rgba(255, 0, 0, 0.1);
+}
+
+/* Number Records Container */
+.profile-number-records {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    box-sizing: border-box;
+    background-color: var(--background-color);
+    margin-top: 20px;
+}
+
+.number-record {
+    padding: 15px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.number-record:last-child {
+    border-bottom: none;
+}
+
+.number-record-label {
+    font-weight: bold;
+    min-width: 100px;
+    padding-right: 10px;
+}
+
+.number-record-value {
+    flex: 1;
+    word-break: break-word;
+}
+
+.number-record-image {
+    max-width: 100%;
+    max-height: 300px;
+    object-fit: contain;
 }

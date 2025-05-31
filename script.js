@@ -2,6 +2,44 @@
 const API_BASE_URL = 'https://api.web3.bio';
 const DEFAULT_AVATAR = 'https://raw.githubusercontent.com/GeoCities/Ads/main/Ads/Nyan%20Cat%20-%20GeoCities.gif';
 
+// ENS names for the grid
+// Priority ENS names that will always appear in specific positions
+const PRIORITY_ENS_NAMES = [
+    'ens.eth',           // Always 1st
+    'geocities.eth',     // Always 2nd
+    'efp.eth',           // Always 3rd
+    'base.eth',          // Always 4th
+    'enspunks.eth',      // Always 5th
+    'vitalik.eth',       // Always 6th
+    'likebutton.eth',    // Always 7th
+    'brianarmstrong.eth',// Always 8th
+    'jesse.base.eth',    // Always 9th
+    'nick.eth',          // Always 10th
+    'mely.eth',          // Always 11th
+    'art.mely.eth',      // Always 12th
+    'drea.eth',          // Always 13th
+    'lcfr.eth',          // Always 14th
+    'brantly.eth',       // Always 15th
+    'caveman.eth'        // Always 16th
+];
+
+// Other ENS names that will be shuffled
+const OTHER_ENS_NAMES = [
+    'shabbat.eth', 'furyan.eth',
+    'magnum.eth', 'ethgalaxy.eth', 'sean3.eth', 'hid.eth', 'artiefishal.eth',
+    'thenftverse.eth', 'cheeseworld.eth', '2️⃣2️⃣.eth', 'flexter.eth', 'thegoat.eth',
+    'going.eth', 'sargent.eth', '👨‍🎤.eth',
+    'broke.eth', 'thecap.eth', 'odie.eth', '184.eth', '4444.eth',
+    'web3go.eth', 'web3come.eth', 'dwr.eth', 'kevforking.eth', 'pol.eth',
+    'kias.eth', 'keith.eth', 'shipoffools.eth', 'webhash.eth',
+    '1985.eth', 'namesys.eth', '0xneelam.eth',
+    'thehedgehog.eth', '$ron.eth', 'master.eth',
+    'gnosis.eth', 'satoshi.dev.eth', 'meta8.eth', 'pepe.eth'
+];
+
+// Combined array for backward compatibility
+const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
+
 // Get DOM elements
 const bgColorPicker = document.getElementById('bg-color');
 const textColorPicker = document.getElementById('text-color');
@@ -175,7 +213,29 @@ function toggleTheme() {
         effectSelect.value = 'none';
     }
     
-    // If there's a default avatar, regenerate it with the new theme colors
+    // Reset dropdown color pickers and effect select if they exist
+    const navBgColor = document.getElementById('nav-bg-color');
+    const navTextColor = document.getElementById('nav-text-color');
+    const navBorderColor = document.getElementById('nav-border-color');
+    const navEffectSelect = document.getElementById('nav-effect-select');
+    
+    if (navBgColor) {
+        navBgColor.value = getComputedStyle(document.documentElement).getPropertyValue('--background-color').trim();
+    }
+    
+    if (navTextColor) {
+        navTextColor.value = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim();
+    }
+    
+    if (navBorderColor) {
+        navBorderColor.value = getComputedStyle(document.documentElement).getPropertyValue('--border-color').trim();
+    }
+    
+    if (navEffectSelect) {
+        navEffectSelect.value = 'none';
+    }
+    
+    // If there's a default avatar in the nav, regenerate it with the new theme colors
     const navLogoImg = document.getElementById('nav-logo-img');
     if (navLogoImg && navLogoImg.dataset.isDefaultAvatar === 'true') {
         // Use the stored original letter if available
@@ -183,6 +243,24 @@ function toggleTheme() {
         const defaultAvatar = createDefaultAvatar(originalLetter);
         setAvatar(defaultAvatar, originalLetter);
     }
+    
+    // Update all default avatars in the ENS grid
+    updateENSGridAvatars();
+}
+
+// Function to update all default avatars in the ENS grid when theme changes
+function updateENSGridAvatars() {
+    // Find all avatar images in the ENS grid
+    const avatarImages = document.querySelectorAll('.ens-avatar img');
+    
+    // Update each default avatar with new theme colors
+    avatarImages.forEach(img => {
+        if (img.dataset.isDefaultAvatar === 'true' && img.dataset.originalLetter) {
+            // Regenerate the default avatar with the new theme colors
+            const defaultAvatar = createDefaultAvatar(img.dataset.originalLetter);
+            img.src = defaultAvatar;
+        }
+    });
 }
 
 // Style-related functions
@@ -224,7 +302,50 @@ function applyCustomStyles(e) {
             .search-button, #theme-toggle, .profile-record, .profile-header-image, 
             .download-website-container, .control-button, #follow-button, .follow-button,
             .download-website-button, .deploy-website-button, .connect-website-button,
-            .effect-select, #effect-select, .effect-control, select, option {
+            .effect-select, #effect-select, .effect-control, select, option,
+            #bg-color, #text-color, #border-color, .color-picker, .color-button, input[type="color"],
+            .ens-grid-container, .ens-profile, .ens-name, .ens-avatar,
+            .dropdown-btn, .dropdown-content, .dropdown-section, .dropdown-controls,
+            .dropdown-website-button, #nav-bg-color, #nav-text-color, #nav-border-color, 
+            #nav-effect-select, .dropdown-section h4 {
+                background-color: ${bgColor} !important;
+                color: ${textColor} !important;
+                border-color: ${borderColor} !important;
+            }
+            
+            /* Specifically target all dropdown buttons including Edit Records and Follow */
+            .dropdown-button, #nav-edit-records, #nav-efp-link, #nav-download-website, #nav-connect-website {
+                background-color: ${bgColor} !important;
+                color: ${textColor} !important;
+                border-color: ${borderColor} !important;
+            }
+            
+            /* Specifically target the button text and labels */
+            .button-text, .control-button span, .dropdown-button, .dropdown-section h4,
+            #nav-effect-select, .effect-select, .dropdown-controls-col .control-button span {
+                color: ${textColor} !important;
+            }
+            
+            /* Specifically target the search input placeholder */
+            .search-input::placeholder {
+                color: ${textColor} !important;
+                opacity: 0.7 !important;
+            }
+            
+            /* Specifically target the avatar border */
+            .nav-logo {
+                border: 1px solid ${borderColor} !important;
+            }
+            .nav-logo img {
+                border-color: ${borderColor} !important;
+            }
+            
+            /* Ensure light mode also applies these styles */
+            [data-theme="light"] .dropdown-button,
+            [data-theme="light"] #nav-edit-records,
+            [data-theme="light"] #nav-efp-link,
+            [data-theme="light"] #nav-download-website,
+            [data-theme="light"] #nav-connect-website {
                 background-color: ${bgColor} !important;
                 color: ${textColor} !important;
                 border-color: ${borderColor} !important;
@@ -236,6 +357,12 @@ function applyCustomStyles(e) {
         document.documentElement.style.setProperty('--primary-color', textColor, 'important');
         document.documentElement.style.setProperty('--border-color', borderColor, 'important');
     }
+    
+    // Apply changes immediately to all elements
+    document.body.style.setProperty('background-color', bgColor, 'important');
+    document.querySelectorAll('.download-website-container, .control-button').forEach(el => {
+        el.style.setProperty('background-color', bgColor, 'important');
+    });
     
     // If there's an ENS name with no avatar, regenerate the default avatar with new colors
     const navLogoImg = document.getElementById('nav-logo-img');
@@ -299,7 +426,9 @@ function applyGlowEffect() {
         '.nav-logo, .search-input, .search-button, #theme-toggle, ' +
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
         '.color-button, .effect-select, .follow-button, .control-button, ' +
-        '.download-website-button, .deploy-website-button, .connect-website-button'
+        '.download-website-button, .deploy-website-button, .connect-website-button, ' +
+        '.dropdown-btn, .dropdown-content, .dropdown-section, .dropdown-controls, ' +
+        '.dropdown-website-button, #settings-dropdown-btn, .dropdown-button'
     );
     elements.forEach(el => {
         // Static glow at the low end of the animation
@@ -313,7 +442,10 @@ function removeGlowEffect() {
     const elements = document.querySelectorAll(
         '.nav-logo, .search-input, .search-button, #theme-toggle, ' +
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
-        '.color-button, .effect-select'
+        '.color-button, .effect-select, .follow-button, .control-button, ' +
+        '.download-website-button, .deploy-website-button, .connect-website-button, ' +
+        '.dropdown-btn, .dropdown-content, .dropdown-section, .dropdown-controls, ' +
+        '.dropdown-website-button, #settings-dropdown-btn, .dropdown-button'
     );
     elements.forEach(el => {
         el.style.boxShadow = 'none';
@@ -424,61 +556,82 @@ function applyRainbowEffect() {
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
         '.color-button, .effect-select, .follow-button, .control-button, ' +
         '.download-website-button, .deploy-website-button, .connect-website-button, ' +
-        '.profile-record hr'
+        '.profile-record hr, .dropdown-btn, .dropdown-content, .dropdown-section, ' +
+        '.dropdown-controls, .dropdown-website-button, #settings-dropdown-btn, .dropdown-section h4, ' +
+        '.dropdown-button'
     );
     
-    // First clear any existing animations
-    elements.forEach(el => {
-        el.style.animation = 'none';
-    });
+    // Define the main rainbow colors
+    const colors = [
+        [255, 0, 0],     // Red
+        [255, 128, 0],   // Orange
+        [255, 255, 0],   // Yellow
+        [0, 255, 0],     // Green
+        [0, 0, 255],     // Blue
+        [128, 0, 255],   // Purple
+        [255, 0, 0]      // Back to red (for smooth loop)
+    ];
     
-    // Force a reflow to ensure all animations are cleared
-    void document.body.offsetHeight;
+    // Total animation duration in milliseconds
+    const animationDuration = 3000; // 3 seconds for a full cycle
+    const fps = 60; // Frames per second for smooth animation
+    const interval = 1000 / fps; // Interval between frames in ms
     
-    // Create the style element with the animation
-    const styleSheet = document.createElement('style');
-    styleSheet.id = 'rainbow-effect-style';
-    styleSheet.textContent = `
-        @keyframes rainbowBorder {
-            0% { border-color: #ff0000; }
-            16.666% { border-color: #ff8000; }
-            33.333% { border-color: #ffff00; }
-            50% { border-color: #00ff00; }
-            66.666% { border-color: #0000ff; }
-            83.333% { border-color: #8000ff; }
-            100% { border-color: #ff0000; }
-        }
-    `;
-    document.head.appendChild(styleSheet);
+    // Track animation progress
+    let startTime = Date.now();
     
-    // Apply the rainbow effect to all elements with a small delay
-    setTimeout(() => {
-        elements.forEach(el => {
-            el.style.animation = 'rainbowBorder 3s linear infinite';
-        });
+    // Helper function to interpolate between two colors
+    function interpolateColor(color1, color2, factor) {
+        const r = Math.round(color1[0] + factor * (color2[0] - color1[0]));
+        const g = Math.round(color1[1] + factor * (color2[1] - color1[1]));
+        const b = Math.round(color1[2] + factor * (color2[2] - color1[2]));
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+    
+    // Store the interval ID so we can clear it later
+    window.rainbowInterval = setInterval(() => {
+        // Calculate current position in the animation
+        const elapsed = (Date.now() - startTime) % animationDuration;
+        const position = elapsed / animationDuration * (colors.length - 1);
         
-        // Force another reflow to ensure all animations start at the same time
-        void document.body.offsetHeight;
-    }, 50);
+        // Determine which two colors to interpolate between
+        const index = Math.floor(position);
+        const nextIndex = (index + 1) % colors.length;
+        
+        // Calculate interpolation factor between the two colors (0-1)
+        const factor = position - index;
+        
+        // Get the interpolated color
+        const color = interpolateColor(colors[index], colors[nextIndex], factor);
+        
+        // Apply the color to all elements
+        elements.forEach(el => {
+            el.style.setProperty('border-color', color, 'important');
+        });
+    }, interval);
 }
 
 function removeRainbowEffect() {
+    // Clear the interval if it exists
+    if (window.rainbowInterval) {
+        clearInterval(window.rainbowInterval);
+        window.rainbowInterval = null;
+    }
+    
+    // Reset border colors on all elements
     const elements = document.querySelectorAll(
         '.nav-logo, .search-input, .search-button, #theme-toggle, ' +
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
         '.color-button, .effect-select, .follow-button, .control-button, ' +
-        '.download-website-button, .deploy-website-button, .connect-website-button'
+        '.download-website-button, .deploy-website-button, .connect-website-button, ' +
+        '.profile-record hr, .dropdown-btn, .dropdown-content, .dropdown-section, ' +
+        '.dropdown-controls, .dropdown-website-button, #settings-dropdown-btn, .dropdown-section h4, ' +
+        '.dropdown-button'
     );
-    elements.forEach(el => {
-        el.style.animation = '';
-        el.style.borderColor = ''; // Reset border color
-    });
     
-    // Remove any existing rainbow style
-    const existingStyle = document.getElementById('rainbow-effect-style');
-    if (existingStyle) {
-        existingStyle.remove();
-    }
+    elements.forEach(el => {
+        el.style.removeProperty('border-color');
+    });
 }
 
 function applyMatrixEffect() {
@@ -669,7 +822,10 @@ function applyNeonEffect() {
         '.nav-logo, .search-input, .search-button, #theme-toggle, ' +
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
         '.color-button, .effect-select, .follow-button, .control-button, ' +
-        '.download-website-button, .deploy-website-button, .connect-website-button'
+        '.download-website-button, .deploy-website-button, .connect-website-button, ' +
+        '.dropdown-btn, .dropdown-content, .dropdown-section, .dropdown-controls, ' +
+        '.dropdown-website-button, #settings-dropdown-btn, .dropdown-section h4, ' +
+        '.dropdown-button'
     );
     elements.forEach(el => {
         el.style.textShadow = `0 0 5px ${borderColorPicker.value}, 0 0 10px ${borderColorPicker.value}`;
@@ -690,7 +846,8 @@ function applyNeonEffect() {
         .nav-logo, .search-input, .search-button, #theme-toggle, 
         .profile-records, .profile-record, .profile-header-image, .footer, 
         .color-button, .effect-select, .follow-button, .control-button, 
-        .download-website-button, .deploy-website-button, .connect-website-button {
+        .download-website-button, .deploy-website-button, .connect-website-button,
+        .dropdown-button {
             text-shadow: 0 0 5px ${borderColorPicker.value}, 0 0 10px ${borderColorPicker.value};
             box-shadow: 0 0 5px ${borderColorPicker.value}, 0 0 10px ${borderColorPicker.value};
         }
@@ -703,12 +860,15 @@ function removeNeonEffect() {
         '.nav-logo, .search-input, .search-button, #theme-toggle, ' +
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
         '.color-button, .effect-select, .follow-button, .control-button, ' +
-        '.download-website-button, .deploy-website-button, .connect-website-button'
+        '.download-website-button, .deploy-website-button, .connect-website-button, ' +
+        '.dropdown-btn, .dropdown-content, .dropdown-section, .dropdown-controls, ' +
+        '.dropdown-website-button, #settings-dropdown-btn, .dropdown-section h4, ' +
+        '.dropdown-button'
     );
     elements.forEach(el => {
-        el.style.textShadow = '';
-        el.style.boxShadow = '';
-        el.style.animation = '';
+        el.style.textShadow = 'none';
+        el.style.boxShadow = 'none';
+        el.style.animation = 'none';
     });
     
     // Remove any existing neon style
@@ -723,7 +883,8 @@ function removeGlowEffect() {
         '.nav-logo, .search-input, .search-button, #theme-toggle, ' +
         '.profile-records, .profile-record, .profile-header-image, .footer, ' +
         '.color-button, .effect-select, .follow-button, .control-button, ' +
-        '.download-website-button, .deploy-website-button, .connect-website-button'
+        '.download-website-button, .deploy-website-button, .connect-website-button, ' +
+        '.dropdown-button'
     );
     elements.forEach(el => {
         el.style.boxShadow = '';
@@ -732,25 +893,53 @@ function removeGlowEffect() {
 }
 
 function applyVaporwareEffect() {
+    // Apply gradient background to body
     document.body.style.background = 'linear-gradient(45deg, #ff00ff, #00ffff)';
     document.body.style.backgroundSize = '100% 100%';
     
-    const navBar = document.querySelector('.nav-bar');
-    if (navBar) {
-        navBar.style.backgroundColor = 'transparent';
-        navBar.style.borderColor = '#ffffff';
+    // Create a style element for vaporware effect
+    let vaporwareStyleEl = document.getElementById('vaporware-effect-styles');
+    if (!vaporwareStyleEl) {
+        vaporwareStyleEl = document.createElement('style');
+        vaporwareStyleEl.id = 'vaporware-effect-styles';
+        document.head.appendChild(vaporwareStyleEl);
     }
+    
+    // Apply vaporware styles with !important to override theme settings
+    // Only apply to containers/backgrounds, not the elements themselves
+    vaporwareStyleEl.textContent = `
+        /* Apply to main containers */
+        .nav-bar, .search-container, .download-website-container {
+            background-color: transparent !important;
+        }
+        
+        /* Apply to page background but preserve element styling */
+        body > .container, #profile-page {
+            background-color: transparent !important;
+        }
+    `;
 }
 
 function removeVaporwareEffect() {
+    // Reset body background
     document.body.style.background = '';
     document.body.style.backgroundSize = '';
     
-    const navBar = document.querySelector('.nav-bar');
-    if (navBar) {
-        navBar.style.backgroundColor = '';
-        navBar.style.borderColor = '';
+    // Remove the vaporware style element
+    const vaporwareStyleEl = document.getElementById('vaporware-effect-styles');
+    if (vaporwareStyleEl) {
+        vaporwareStyleEl.remove();
     }
+    
+    // Reset any inline styles that might have been applied to containers
+    const containers = document.querySelectorAll(
+        '.nav-bar, .search-container, .download-website-container, ' +
+        'body > .container, #profile-page'
+    );
+    
+    containers.forEach(el => {
+        el.style.backgroundColor = '';
+    });
 }
 
 // Add the download functionality
@@ -1536,8 +1725,15 @@ function displayProfile(data, ensName) {
     const profilePage = document.getElementById('profile-page');
     const container = document.querySelector('.container');
     const profileRecords = document.querySelector('.profile-records');
+    const numberRecords = document.querySelector('.profile-number-records');
     const headerImage = document.querySelector('.profile-header-image');
     const controlButtons = document.querySelectorAll('.control-button');
+    
+    // Scroll to top of the page for better UX
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+    });
     
     // Store the current effect before clearing anything
     const currentEffect = effectSelect ? effectSelect.value : 'none';
@@ -1556,6 +1752,7 @@ function displayProfile(data, ensName) {
     
     // Clear existing records
     if (profileRecords) profileRecords.innerHTML = '';
+    if (numberRecords) numberRecords.innerHTML = '';
     
     // Update avatar
     if (data.avatar) {
@@ -1563,12 +1760,12 @@ function displayProfile(data, ensName) {
     } else {
         const firstLetter = ensName.charAt(0);
         const defaultAvatar = createDefaultAvatar(firstLetter);
-        setAvatar(defaultAvatar);
+        setAvatar(defaultAvatar, firstLetter);
         
         // Store the letter for later regeneration if colors change
         const navLogo = document.getElementById('nav-logo-img');
         if (navLogo) {
-            navLogo.dataset.letter = firstLetter;
+            navLogo.dataset.originalLetter = firstLetter;
         }
     }
     
@@ -1702,6 +1899,38 @@ function displayProfile(data, ensName) {
         addProfileRecord('Created', formattedDate);
     }
 
+    // Extract and display number records
+    if (data.records) {
+        const numberRecordsData = [];
+        
+        // Find all records with numeric keys
+        Object.entries(data.records).forEach(([key, value]) => {
+            // Check if the key is a number (or a string containing only digits)
+            if (/^\d+$/.test(key)) {
+                numberRecordsData.push({
+                    key: parseInt(key, 10),
+                    value
+                });
+            }
+        });
+        
+        // Sort number records in reverse order (highest to lowest)
+        numberRecordsData.sort((a, b) => b.key - a.key);
+        
+        // Display number records if any exist
+        if (numberRecordsData.length > 0) {
+            numberRecordsData.forEach(record => {
+                addNumberRecord(record.key.toString(), record.value);
+            });
+        } else {
+            // Hide the number records container if no number records exist
+            if (numberRecords) numberRecords.style.display = 'none';
+        }
+    } else {
+        // Hide the number records container if no records data exists
+        if (numberRecords) numberRecords.style.display = 'none';
+    }
+    
     // Show download, deploy, and connect buttons
     const downloadContainer = document.querySelector('.download-website-container');
     if (downloadContainer) downloadContainer.style.display = 'block';
@@ -1781,24 +2010,86 @@ function updateNavBar(name, isRegistered) {
         navButtons.appendChild(themeToggle);
     }
     
-    // Add the Follow button for homepage or registered profiles
-    if (name === 'home' || isRegistered) {
-        const followButton = document.createElement('a');
-        followButton.id = 'follow-button';
-        followButton.className = 'follow-button';
-        followButton.textContent = 'Follow';
-        followButton.target = '_blank';
-        followButton.rel = 'noopener noreferrer';
+    // Remove any existing dropdown
+    let existingDropdown = document.querySelector('.dropdown');
+    if (existingDropdown) {
+        existingDropdown.remove();
+    }
+    
+    // Only add dropdown for registered profiles (not homepage or unregistered names)
+    if (name !== 'home' && isRegistered) {
+        // Log the name for debugging
+        console.log('Profile name for links:', name);
+        // Create dropdown with updated structure
+        const dropdown = document.createElement('div');
+        dropdown.className = 'dropdown';
+        dropdown.innerHTML = `
+            <button id="settings-dropdown-btn" class="dropdown-btn">🏗️</button>
+            <div id="settings-dropdown-content" class="dropdown-content">
+                <div class="dropdown-section">
+                    <h4>Design</h4>
+                    <div class="dropdown-controls-col">
+                        <label class="control-button bg-control">
+                            <input type="color" id="nav-bg-color" class="color-picker" title="Background">
+                            <span class="button-text">Background</span>
+                        </label>
+                        <label class="control-button text-control">
+                            <input type="color" id="nav-text-color" class="color-picker" title="Text">
+                            <span class="button-text">Text</span>
+                        </label>
+                        <label class="control-button border-control">
+                            <input type="color" id="nav-border-color" class="color-picker" title="Border">
+                            <span class="button-text">Border</span>
+                        </label>
+                        <div class="control-button effect-control">
+                            <select id="nav-effect-select" class="effect-select">
+                                <option value="none">Effect</option>
+                                <option value="glow">Glow</option>
+                                <option value="snow">Snow</option>
+                                <option value="stars">Stars</option>
+                                <option value="rainbow">Rainbow</option>
+                                <option value="matrix">Matrix</option>
+                                <option value="neon">Neon</option>
+                                <option value="vaporware">Vaporware</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="dropdown-section">
+                    <h4>Website</h4>
+                    <div class="dropdown-buttons">
+                        <a href="#" class="dropdown-button download-website-button" id="nav-download-website">Download</a>
+                        <a href="https://hashvault.xyz" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy</a>
+                        <a href="https://app.ens.domains/${name}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect</a>
+                    </div>
+                </div>
+                <div class="dropdown-section">
+                    <h4>ENS/Basename</h4>
+                    <div class="dropdown-buttons">
+                        <a href="https://app.ens.domains/${name}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
+                    </div>
+                </div>
+                <div class="dropdown-section">
+                    <h4>EFP</h4>
+                    <div class="dropdown-buttons">
+                        <a href="https://efp.app/" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
+                    </div>
+                </div>
+            </div>
+        `;
         
-        // Set the appropriate URL based on whether it's homepage or a profile
-        if (name === 'home') {
-            followButton.href = 'https://efp.app/geocities.eth';
-        } else {
-            followButton.href = `https://efp.app/${name}`;
+        // Add the dropdown to the nav buttons after the theme toggle
+        navButtons.appendChild(dropdown);
+        
+        // Update the EFP link with the correct profile name
+        const navEfpLink = document.getElementById('nav-efp-link');
+        if (navEfpLink) {
+            navEfpLink.href = `https://efp.app/${name}`;
+            console.log('Updated EFP link:', navEfpLink.href);
         }
         
-        // Insert the follow button before the theme toggle
-        navButtons.insertBefore(followButton, themeToggle);
+        // Initialize dropdown functionality
+        setupDropdown();
     }
 }
 
@@ -1806,8 +2097,15 @@ function displayUnregisteredProfile(ensName) {
     const profilePage = document.getElementById('profile-page');
     const container = document.querySelector('.container');
     const profileRecords = document.querySelector('.profile-records');
+    const numberRecords = document.querySelector('.profile-number-records');
     const headerImage = document.querySelector('.profile-header-image');
     const controlButtons = document.querySelectorAll('.control-button');
+    
+    // Scroll to top of the page for better UX
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+    });
     
     // Hide homepage content and show profile page
     if (container) container.style.display = 'none';
@@ -1815,6 +2113,12 @@ function displayUnregisteredProfile(ensName) {
     
     // Clear existing records
     if (profileRecords) profileRecords.innerHTML = '';
+    
+    // Hide number records container for unregistered profiles
+    if (numberRecords) {
+        numberRecords.innerHTML = '';
+        numberRecords.style.display = 'none';
+    }
     
     // Reset to default theme colors based on current theme
     resetToDefaultThemeColors();
@@ -1917,10 +2221,72 @@ function addProfileRecord(label, value, isLink = false, href = '') {
     profileRecords.appendChild(record);
 }
 
+// Function to add a number record to the number records container
+function addNumberRecord(label, value) {
+    const numberRecords = document.querySelector('.profile-number-records');
+    if (!numberRecords) return;
+    
+    // Make sure the container is visible
+    numberRecords.style.display = 'block';
+    
+    const record = document.createElement('div');
+    record.className = 'number-record';
+    
+    const labelElement = document.createElement('div');
+    labelElement.className = 'number-record-label';
+    labelElement.textContent = label;
+    
+    const valueElement = document.createElement('div');
+    valueElement.className = 'number-record-value';
+    
+    // Check if the value is an image URL
+    const isImageUrl = typeof value === 'string' && (
+        value.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ||
+        value.startsWith('https://i.imgur.com/') ||
+        value.startsWith('https://ipfs.io/') ||
+        value.includes('cloudfront.net') ||
+        value.includes('nftstorage.link')
+    );
+    
+    if (isImageUrl) {
+        // Create an image element
+        const img = document.createElement('img');
+        img.src = value;
+        img.alt = `Record ${label}`;
+        img.className = 'number-record-image';
+        img.loading = 'lazy'; // Use lazy loading for performance
+        
+        // Add error handling to fall back to text if image fails to load
+        img.onerror = () => {
+            valueElement.textContent = value;
+        };
+        
+        valueElement.appendChild(img);
+    } else if (typeof value === 'string' && value.startsWith('http')) {
+        // It's a link but not an image
+        const link = document.createElement('a');
+        link.href = value;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = value;
+        valueElement.appendChild(link);
+    } else {
+        // Regular text value
+        valueElement.textContent = value;
+    }
+    
+    record.appendChild(labelElement);
+    record.appendChild(valueElement);
+    numberRecords.appendChild(record);
+}
+
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize GeoCities avatar
     initializeGeoCitiesAvatar();
+    
+    // Initialize the ENS grid
+    initializeENSGrid();
     
     // Initialize the homepage nav bar with Follow button
     updateNavBar('home', true);
@@ -2357,10 +2723,499 @@ async function createPWAIcons(avatarUrl) {
     }
 }
 
+// Function to initialize and populate the ENS grid
+async function initializeENSGrid() {
+    const ensGrid = document.getElementById('ens-grid');
+    if (!ensGrid) return;
+    
+    // Clear any existing content
+    ensGrid.innerHTML = '';
+    
+    // Determine how many columns we have based on the current CSS
+    const columnsPerRow = getColumnsPerRow();
+    
+    // Display 10 rows, with the number of columns determined by the responsive layout
+    const ROWS = 10;
+    const profilesNeeded = columnsPerRow * ROWS;
+    
+    // Create an ordered list of ENS names:
+    // 1. Start with the priority names in their fixed order
+    // 2. Add shuffled non-priority names
+    // 3. Limit to the number needed for the grid
+    
+    // First, include all priority names
+    const orderedNames = [...PRIORITY_ENS_NAMES];
+    
+    // Then shuffle and add the remaining names
+    const shuffledOtherNames = [...OTHER_ENS_NAMES].sort(() => Math.random() - 0.5);
+    
+    // Combine the priority names with the shuffled other names
+    orderedNames.push(...shuffledOtherNames);
+    
+    // Limit to the number of profiles needed for the grid
+    const limitedNames = orderedNames.slice(0, profilesNeeded);
+    
+    // Create and append ENS profile elements
+    const profileElements = [];
+    
+    // First create all profile elements with default avatars
+    for (const ensName of limitedNames) {
+        const profileElement = createENSProfileElement(ensName);
+        ensGrid.appendChild(profileElement);
+        profileElements.push(profileElement);
+    }
+    
+    // Set up lazy loading for the avatar images
+    setupLazyLoading();
+    
+    // Add window resize listener to update the grid when screen size changes
+    window.addEventListener('resize', debounce(() => {
+        // Only reinitialize if the column count has changed
+        const newColumnsPerRow = getColumnsPerRow();
+        if (newColumnsPerRow !== columnsPerRow) {
+            initializeENSGrid();
+        }
+    }, 250));
+}
+
+// Function to create an ENS profile element
+function createENSProfileElement(ensName) {
+    // Create container
+    const profileElement = document.createElement('div');
+    profileElement.className = 'ens-profile';
+    profileElement.setAttribute('data-ens', ensName);
+    
+    // Create avatar container
+    const avatarContainer = document.createElement('div');
+    avatarContainer.className = 'ens-avatar';
+    
+    // Create avatar image (initially with default avatar)
+    const avatarImg = document.createElement('img');
+    avatarImg.src = DEFAULT_AVATAR;
+    avatarImg.alt = `${ensName} avatar`;
+    avatarImg.loading = 'lazy'; // Add lazy loading attribute
+    avatarImg.dataset.ensName = ensName; // Store ENS name for lazy loading
+    avatarContainer.appendChild(avatarImg);
+    
+    // Create name element
+    const nameElement = document.createElement('div');
+    nameElement.className = 'ens-name';
+    nameElement.textContent = ensName;
+    
+    // Add click event to search for this ENS name
+    profileElement.addEventListener('click', () => {
+        // Get all search inputs
+        const searchInputs = document.querySelectorAll('.search-input');
+        if (searchInputs.length > 0) {
+            // Set the first search input's value to this ENS name
+            searchInputs[0].value = ensName;
+            // Trigger search
+            const searchButton = searchInputs[0].nextElementSibling;
+            if (searchButton && searchButton.classList.contains('search-button')) {
+                searchButton.click();
+            }
+        }
+    });
+    
+    // Append elements to profile container
+    profileElement.appendChild(avatarContainer);
+    profileElement.appendChild(nameElement);
+    
+    // We'll use intersection observer instead of fetching immediately
+    // This will be handled by setupLazyLoading()
+    
+    return profileElement;
+}
+
+// Process avatars in batches to avoid overwhelming the API
+async function loadAvatarsInBatches(avatarQueue) {
+    // We don't need this function anymore with our new lazy loading approach
+    // The Intersection Observer will handle loading avatars as they come into view
+    return;
+}
+
+// Preload a small set of avatars for the initially visible profiles
+async function preloadVisibleAvatars() {
+    // Only preload the first few avatars that are likely to be visible initially
+    const PRELOAD_COUNT = 5; // Just preload the first few avatars that are immediately visible
+    
+    // Find visible avatar images
+    const avatarImages = document.querySelectorAll('.ens-avatar img[data-ens-name]');
+    const visibleAvatars = Array.from(avatarImages).slice(0, PRELOAD_COUNT);
+    
+    // Preload these avatars immediately
+    for (const img of visibleAvatars) {
+        const ensName = img.dataset.ensName;
+        if (ensName) {
+            // Fetch immediately but don't wait for completion
+            fetchENSAvatar(ensName, img).catch(err => {
+                // Silently handle errors for preloading
+                console.warn(`Error preloading avatar for ${ensName}:`, err);
+            });
+        }
+    }
+}
+
+// Avatar cache to prevent redundant API calls
+const avatarCache = new Map();
+
+// Function to fetch an ENS avatar
+async function fetchENSAvatar(ensName, imgElement) {
+    try {
+        // Create a default avatar with the first letter as a fallback
+        const firstLetter = ensName.charAt(0);
+        const defaultAvatar = createDefaultAvatar(firstLetter);
+        
+        // Set default avatar first to ensure something is displayed
+        imgElement.src = defaultAvatar;
+        imgElement.dataset.originalLetter = firstLetter; // Store for theme changes
+        imgElement.dataset.isDefaultAvatar = 'true';
+        
+        // Check if we already have this avatar in cache
+        if (avatarCache.has(ensName)) {
+            const cachedData = avatarCache.get(ensName);
+            if (cachedData === 'default') {
+                // We already know this ENS has no avatar, keep using default
+                return;
+            } else {
+                // Use cached avatar URL
+                imgElement.src = cachedData;
+                imgElement.dataset.isDefaultAvatar = 'false';
+                return;
+            }
+        }
+        
+        // Determine the correct API endpoint based on the ENS name
+        let url = `${API_BASE_URL}/profile/ens/${ensName}`;
+        if (ensName.endsWith('.base.eth')) {
+            url = `${API_BASE_URL}/profile/basenames/${ensName}`;
+        }
+        
+        // Fetch the profile data with a timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000); // Reduced to 3 second timeout
+        
+        const response = await fetch(url, { 
+            signal: controller.signal,
+            cache: 'force-cache' // Use browser cache aggressively
+        });
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.avatar) {
+                // Store in cache
+                avatarCache.set(ensName, data.avatar);
+                
+                // Create a new image to test if the avatar URL is valid
+                const testImg = new Image();
+                testImg.onload = () => {
+                    // If the image loads successfully, update the displayed avatar
+                    imgElement.src = data.avatar;
+                    imgElement.dataset.isDefaultAvatar = 'false';
+                };
+                testImg.onerror = () => {
+                    // If the image fails to load, keep using the default avatar
+                    console.warn(`Avatar image failed to load for ${ensName}, using default`);
+                    // Cache the fact that this ENS uses default avatar
+                    avatarCache.set(ensName, 'default');
+                    // Keep the default avatar that was already set
+                };
+                testImg.src = data.avatar;
+            } else {
+                // No avatar in the data, cache this fact
+                avatarCache.set(ensName, 'default');
+            }
+        } else {
+            // API response not OK, cache this fact
+            avatarCache.set(ensName, 'default');
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.warn(`Timeout fetching avatar for ${ensName}`);
+        } else {
+            console.error(`Error fetching avatar for ${ensName}:`, error);
+        }
+        // Cache the error so we don't try again
+        avatarCache.set(ensName, 'default');
+    }
+}
+
+// Set up lazy loading for avatar images using Intersection Observer
+function setupLazyLoading() {
+    // Preload the first few visible avatars immediately
+    preloadVisibleAvatars();
+    
+    // Check if Intersection Observer is supported
+    if (!('IntersectionObserver' in window)) {
+        // Fallback for browsers that don't support Intersection Observer
+        // Load remaining avatars with a slight delay to prioritize visible content
+        setTimeout(() => {
+            const avatarImages = document.querySelectorAll('.ens-avatar img[data-ens-name]');
+            let delay = 0;
+            const DELAY_INCREMENT = 100; // 100ms between each avatar load
+            
+            avatarImages.forEach((img, index) => {
+                // Skip the first few that were preloaded
+                if (index < 5) return;
+                
+                const ensName = img.dataset.ensName;
+                if (ensName) {
+                    setTimeout(() => {
+                        fetchENSAvatar(ensName, img);
+                    }, delay);
+                    delay += DELAY_INCREMENT;
+                }
+            });
+        }, 1000); // Wait 1 second after page load before loading non-visible avatars
+        return;
+    }
+    
+    // Create a new Intersection Observer with higher priority for visible elements
+    const observer = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const img = entry.target;
+                const ensName = img.dataset.ensName;
+                if (ensName) {
+                    // Fetch the avatar when the image comes into view
+                    fetchENSAvatar(ensName, img);
+                    
+                    // Stop observing this image once we've started loading it
+                    observer.unobserve(img);
+                }
+            }
+        });
+    }, {
+        rootMargin: '200px', // Increased to 200px to load earlier
+        threshold: 0.01 // Trigger when even a tiny part is visible
+    });
+    
+    // Find all avatar images and observe them (except the preloaded ones)
+    const avatarImages = document.querySelectorAll('.ens-avatar img[data-ens-name]');
+    avatarImages.forEach((img, index) => {
+        // Skip the first few that were preloaded
+        if (index >= 5) {
+            observer.observe(img);
+        }
+    });
+}
+
+// Helper function to determine how many columns are in the ENS grid based on current CSS
+function getColumnsPerRow() {
+    const ensGrid = document.getElementById('ens-grid');
+    if (!ensGrid) return 5; // Default to 5 if grid not found
+    
+    // Get the computed style to determine the current column count
+    const gridStyle = window.getComputedStyle(ensGrid);
+    const gridTemplateColumns = gridStyle.getPropertyValue('grid-template-columns');
+    
+    // Count how many columns are defined
+    // The value will be something like: "repeat(5, minmax(0px, 1fr))" or "1fr 1fr 1fr 1fr"
+    if (gridTemplateColumns.includes('repeat')) {
+        // Extract the number from repeat(X, ...)
+        const match = gridTemplateColumns.match(/repeat\((\d+)/i);
+        return match ? parseInt(match[1], 10) : 5;
+    } else {
+        // Count the number of 'fr' or other column units
+        return gridTemplateColumns.split(' ').length || 5;
+    }
+}
+
+// Debounce function to limit how often a function is called
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Function to setup dropdown functionality
+function setupDropdown() {
+    const dropdownBtn = document.getElementById('settings-dropdown-btn');
+    const dropdownContent = document.getElementById('settings-dropdown-content');
+    
+    if (!dropdownBtn || !dropdownContent) return;
+    
+    // Reorder dropdown sections to ensure ENS/Basename is at the top
+    function reorderDropdownSections() {
+        const sections = dropdownContent.querySelectorAll('.dropdown-section');
+        if (sections.length >= 4) {
+            // Find the ENS/Basename section (usually the 3rd one, index 2)
+            let ensSection = null;
+            for (let i = 0; i < sections.length; i++) {
+                const heading = sections[i].querySelector('h4');
+                if (heading && heading.textContent.trim() === 'ENS/Basename') {
+                    ensSection = sections[i];
+                    break;
+                }
+            }
+            
+            // If found, move it to the top
+            if (ensSection && ensSection !== sections[0]) {
+                dropdownContent.insertBefore(ensSection, sections[0]);
+            }
+        }
+    }
+    
+    // Call the reordering function
+    reorderDropdownSections();
+    
+    // Toggle dropdown when button is clicked
+    dropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdownContent.classList.toggle('show');
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
+            dropdownContent.classList.remove('show');
+        }
+    });
+    
+    // Setup color pickers in dropdown
+    const navBgColor = document.getElementById('nav-bg-color');
+    const navTextColor = document.getElementById('nav-text-color');
+    const navBorderColor = document.getElementById('nav-border-color');
+    const navEffectSelect = document.getElementById('nav-effect-select');
+    
+    // Sync dropdown color pickers with main color pickers
+    function syncColorPickers() {
+        const bgColor = document.getElementById('bg-color');
+        const textColor = document.getElementById('text-color');
+        const borderColor = document.getElementById('border-color');
+        const effectSelect = document.getElementById('effect-select');
+        
+        if (bgColor && navBgColor) {
+            navBgColor.value = bgColor.value;
+        }
+        
+        if (textColor && navTextColor) {
+            navTextColor.value = textColor.value;
+        }
+        
+        if (borderColor && navBorderColor) {
+            navBorderColor.value = borderColor.value;
+        }
+        
+        if (effectSelect && navEffectSelect) {
+            navEffectSelect.value = effectSelect.value;
+        }
+    }
+    
+    // Update colors when dropdown color pickers change
+    if (navBgColor) {
+        navBgColor.addEventListener('input', (e) => {
+            const bgColor = document.getElementById('bg-color');
+            if (bgColor) {
+                bgColor.value = e.target.value;
+                applyCustomStyles({ target: bgColor });
+            }
+        });
+    }
+    
+    if (navTextColor) {
+        navTextColor.addEventListener('input', (e) => {
+            const textColor = document.getElementById('text-color');
+            if (textColor) {
+                textColor.value = e.target.value;
+                applyCustomStyles({ target: textColor });
+            }
+        });
+    }
+    
+    if (navBorderColor) {
+        navBorderColor.addEventListener('input', (e) => {
+            const borderColor = document.getElementById('border-color');
+            if (borderColor) {
+                borderColor.value = e.target.value;
+                applyCustomStyles({ target: borderColor });
+            }
+        });
+    }
+    
+    // Update effect when dropdown effect select changes
+    if (navEffectSelect) {
+        navEffectSelect.addEventListener('change', () => {
+            const effectSelect = document.getElementById('effect-select');
+            if (effectSelect) {
+                effectSelect.value = navEffectSelect.value;
+                handleEffectChange();
+            }
+        });
+    }
+    
+    // Setup website action buttons in dropdown
+    const navDownloadWebsite = document.getElementById('nav-download-website');
+    const navConnectWebsite = document.getElementById('nav-connect-website');
+    const navEditRecords = document.getElementById('nav-edit-records');
+    const navEfpLink = document.getElementById('nav-efp-link');
+    
+    if (navDownloadWebsite) {
+        navDownloadWebsite.addEventListener('click', (e) => {
+            e.preventDefault();
+            generateDownload();
+        });
+    }
+    
+    if (navConnectWebsite) {
+        // The href is now set directly in the HTML via updateNavBar
+        // No need to click another button
+    }
+    
+    // Setup Edit Records button - now has its own direct link
+    if (navEditRecords) {
+        // The href is now set directly in the HTML via updateNavBar
+        // No need to click another button
+    }
+    
+    // Setup EFP link - will be updated when profile is loaded
+    // The href is now set directly in the updateNavBar function
+    // No need to set a default value here as it will be overridden
+    
+    // Sync color pickers when profile page is shown
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                const profilePage = document.getElementById('profile-page');
+                if (profilePage && profilePage.style.display === 'flex') {
+                    syncColorPickers();
+                }
+            }
+        });
+    });
+    
+    const profilePage = document.getElementById('profile-page');
+    if (profilePage) {
+        observer.observe(profilePage, { attributes: true });
+    }
+}
+
 // Initialize PWA support when the page loads
 document.addEventListener('DOMContentLoaded', () => {
     // Register service worker for main site
     registerServiceWorker();
+    
+    // Initialize the ENS grid
+    initializeENSGrid();
+    
+    // Set up lazy loading for avatars
+    setupLazyLoading();
+    
+    // Initialize color pickers
+    initializeColorPickers();
+    
+    // Set up navigation logo click handler
+    setupNavLogoClickHandler();
+    
+    // Setup dropdown functionality
+    setupDropdown();
     
     // Initialize the GeoCities avatar and create PWA icons
     initializeGeoCitiesAvatar().then(() => {
