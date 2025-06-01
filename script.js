@@ -656,7 +656,7 @@ function applyMatrixEffect() {
         opacity: 0.2;
     `;
     
-    const characters = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
     const columns = Math.floor(window.innerWidth / 30);
     
     // Create style for the matrix effect
@@ -674,16 +674,16 @@ function applyMatrixEffect() {
     // Create columns
     for (let i = 0; i < columns; i++) {
         const column = document.createElement('div');
-        const duration = Math.random() * 4 + 10; // 10-14 seconds duration
+        const duration = Math.random() * 4 + 4; // 4-8 seconds duration
         
         column.style.cssText = `
             position: absolute;
             top: -100px;
-            left: ${i * 30}px;
+            left: ${i * 16}px;
             color: #0f0;
             font-family: monospace;
-            font-size: 18px;
-            line-height: 18px;
+            font-size: 14px;
+            line-height: 14px;
             animation: matrixFall ${duration}s linear infinite;
             animation-delay: -${Math.random() * 10}s;
             text-shadow: 0 0 8px #0f0, 0 0 15px #0f0, 0 0 20px #0f0;
@@ -691,7 +691,7 @@ function applyMatrixEffect() {
         `;
         
         let text = '';
-        const length = 35;
+        const length = 60;
         
         for (let j = 0; j < length; j++) {
             const char = characters[Math.floor(Math.random() * characters.length)];
@@ -699,7 +699,7 @@ function applyMatrixEffect() {
             // First few characters have bright wake effect
             if (j < 6 && Math.random() > 0.3) {
                 const intensity = j === 0 ? 1 : (1 - j/6);
-                const color = j === 0 ? '#fff' : `rgba(255, 255, 255, ${intensity})`;
+                const color = j === 0 ? '#c0ffc0' : `rgba(255, 255, 255, ${intensity})`;
                 const shadow = j === 0 ? 
                     '0 0 10px #fff, 0 0 20px #fff, 0 0 30px #0f0' : 
                     `0 0 ${Math.round(10 * intensity)}px #0f0, 0 0 ${Math.round(15 * intensity)}px #0f0`;
@@ -747,7 +747,7 @@ function applyMatrixEffect() {
         // Continue the animation loop at a reasonable rate
         matrixContainer.dataset.animationId = setTimeout(() => {
             requestAnimationFrame(changeRandomCharacters);
-        }, 100);
+        }, 150);
     }
     
     // Start the character changing effect
