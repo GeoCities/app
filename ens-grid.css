@@ -1,11 +1,14 @@
 .ens-grid-container {
-    width: var(--container-width);
-    max-width: var(--max-width);
+    width: var(--container-width, 90%);
+    max-width: var(--max-width, 1200px);
     margin: 30px auto;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 20px;
     justify-content: center;
+    /* Ensure the grid is visible even if CSS variables aren't loaded */
+    background-color: var(--background-color, transparent);
+    color: var(--primary-color, inherit);
 }
 
 .ens-profile {

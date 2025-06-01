@@ -2822,6 +2822,36 @@ async function initializeENSGrid() {
     // Clear any existing content
     ensGrid.innerHTML = '';
     
+    // Ensure CSS is loaded before calculating grid layout
+    function ensureCssLoaded() {
+        return new Promise(resolve => {
+            // Check if stylesheets are loaded
+            const allStylesheetsLoaded = Array.from(document.styleSheets).some(sheet => {
+                try {
+                    // Look for our grid styles
+                    return sheet.href && (
+                        sheet.href.includes('ens-grid.css') || 
+                        sheet.href.includes('style.css')
+                    );
+                } catch (e) {
+                    // CORS issues might prevent accessing some stylesheets
+                    return false;
+                }
+            });
+            
+            if (allStylesheetsLoaded) {
+                // Give a small delay to ensure styles are applied
+                setTimeout(resolve, 50);
+            } else {
+                // If not loaded yet, check again shortly
+                setTimeout(() => ensureCssLoaded().then(resolve), 50);
+            }
+        });
+    }
+    
+    // Wait for CSS to be loaded
+    await ensureCssLoaded();
+    
     // Determine how many columns we have based on the current CSS
     const columnsPerRow = getColumnsPerRow();
     
@@ -3097,25 +3127,44 @@ function setupLazyLoading() {
     });
 }
 
-// Helper function to determine how many columns are in the ENS grid based on current CSS
+// Helper function to determine how many columns are in the ENS grid based on current CSS and viewport width
 function getColumnsPerRow() {
     const ensGrid = document.getElementById('ens-grid');
     if (!ensGrid) return 5; // Default to 5 if grid not found
     
-    // Get the computed style to determine the current column count
-    const gridStyle = window.getComputedStyle(ensGrid);
-    const gridTemplateColumns = gridStyle.getPropertyValue('grid-template-columns');
-    
-    // Count how many columns are defined
-    // The value will be something like: "repeat(5, minmax(0px, 1fr))" or "1fr 1fr 1fr 1fr"
-    if (gridTemplateColumns.includes('repeat')) {
-        // Extract the number from repeat(X, ...)
-        const match = gridTemplateColumns.match(/repeat\((\d+)/i);
-        return match ? parseInt(match[1], 10) : 5;
-    } else {
-        // Count the number of 'fr' or other column units
-        return gridTemplateColumns.split(' ').length || 5;
+    // First try to get the computed style
+    try {
+        const gridStyle = window.getComputedStyle(ensGrid);
+        const gridTemplateColumns = gridStyle.getPropertyValue('grid-template-columns');
+        
+        // If we have a valid grid-template-columns value
+        if (gridTemplateColumns && gridTemplateColumns !== 'none' && gridTemplateColumns !== '') {
+            // Count how many columns are defined
+            if (gridTemplateColumns.includes('repeat')) {
+                // Extract the number from repeat(X, ...)
+                const match = gridTemplateColumns.match(/repeat\((\d+)/i);
+                if (match && match[1]) {
+                    return parseInt(match[1], 10);
+                }
+            } else {
+                // Count the number of 'fr' or other column units
+                const count = gridTemplateColumns.split(' ').length;
+                if (count > 0) return count;
+            }
+        }
+    } catch (e) {
+        console.log('Error getting computed style:', e);
+        // Continue to fallback method
     }
+    
+    // Fallback: determine columns based on viewport width
+    // This matches the media queries in ens-grid.css
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    
+    if (viewportWidth <= 380) return 2;
+    if (viewportWidth <= 480) return 3;
+    if (viewportWidth <= 900) return 4;
+    return 5; // Default for larger screens
 }
 
 // Debounce function to limit how often a function is called
