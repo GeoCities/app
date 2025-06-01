@@ -280,25 +280,27 @@ h1#homepage-geocities {
     order: 3 !important;
 }
 
-.dropdown-section h4:contains('EFP') {
-    order: 4 !important;
+/* Dropdown section order - EFP, Design, Website, ENS/Basename */
+.dropdown-content {
+    display: flex;
+    flex-direction: column;
 }
 
-/* Alternative approach using direct targeting */
-#settings-dropdown-content .dropdown-section:nth-of-type(3) {
-    order: 1 !important; /* Move ENS/Basename to top */
+/* Set the order for dropdown sections */
+.dropdown-section:nth-child(1) {
+    order: 1 !important; /* EFP at top */
 }
 
-#settings-dropdown-content .dropdown-section:nth-of-type(1) {
-    order: 2 !important; /* Move Design to second */
+.dropdown-section:nth-child(2) {
+    order: 2 !important; /* Design second */
 }
 
-#settings-dropdown-content .dropdown-section:nth-of-type(2) {
-    order: 3 !important; /* Move Website to third */
+.dropdown-section:nth-child(3) {
+    order: 3 !important; /* Website third */
 }
 
-#settings-dropdown-content .dropdown-section:nth-of-type(4) {
-    order: 4 !important; /* Keep EFP at bottom */
+.dropdown-section:nth-child(4) {
+    order: 4 !important; /* ENS/Basename at bottom */
 }
 
 .dropdown-section:last-child {
@@ -372,6 +374,8 @@ h1#homepage-geocities {
     z-index: 1000;
     padding: 12px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    /* Ensure flexbox is used when visible */
+    flex-direction: column;
 }
 
 .dropdown-content.show {
@@ -695,10 +699,31 @@ h1#homepage-geocities {
 }
 
 /* Responsive adjustments */
+/* Slogan styling */
+.slogan-container {
+    text-align: center;
+    font-size: 0.9em;
+    margin-bottom: 1.5rem;
+    font-family: var(--font-main);
+}
+
+#cycling-word {
+    display: inline-block;
+    min-width: 80px;
+    color: var(--primary-color);
+    font-weight: bold;
+    transition: opacity 0.5s ease-in-out;
+}
+
 @media (max-width: 768px) {
     #homepage-geocities {
         font-size: 3.5em;
-        margin: 60px 0 20px 0;
+        margin: 60px 0 10px 0;
+    }
+    
+    .slogan-container {
+        font-size: 1.2rem;
+        margin-bottom: 1.2rem;
     }
 
     .search-container {

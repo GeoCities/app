@@ -3,25 +3,32 @@ const API_BASE_URL = 'https://api.web3.bio';
 const DEFAULT_AVATAR = 'https://raw.githubusercontent.com/GeoCities/Ads/main/Ads/Nyan%20Cat%20-%20GeoCities.gif';
 
 // ENS names for the grid
-// Priority ENS names that will always appear in specific positions
-const PRIORITY_ENS_NAMES = [
+// Fixed priority ENS names that will always appear in specific positions
+const FIXED_PRIORITY_ENS_NAMES = [
     'ens.eth',           // Always 1st
     'geocities.eth',     // Always 2nd
     'efp.eth',           // Always 3rd
     'base.eth',          // Always 4th
     'enspunks.eth',      // Always 5th
-    'vitalik.eth',       // Always 6th
-    'likebutton.eth',    // Always 7th
-    'brianarmstrong.eth',// Always 8th
-    'jesse.base.eth',    // Always 9th
-    'nick.eth',          // Always 10th
-    'mely.eth',          // Always 11th
-    'art.mely.eth',      // Always 12th
-    'drea.eth',          // Always 13th
-    'lcfr.eth',          // Always 14th
-    'brantly.eth',       // Always 15th
-    'caveman.eth'        // Always 16th
 ];
+
+// Priority ENS names that will be randomized on each page load
+const RANDOMIZABLE_PRIORITY_ENS_NAMES = [
+    'vitalik.eth',
+    'likebutton.eth',
+    'brianarmstrong.eth',
+    'jesse.base.eth',
+    'nick.eth',
+    'mely.eth',
+    'art.mely.eth',
+    'drea.eth',
+    'lcfr.eth',
+    'brantly.eth',
+    'caveman.eth'
+];
+
+// Combined priority array for backward compatibility
+const PRIORITY_ENS_NAMES = [...FIXED_PRIORITY_ENS_NAMES, ...RANDOMIZABLE_PRIORITY_ENS_NAMES];
 
 // Other ENS names that will be shuffled
 const OTHER_ENS_NAMES = [
@@ -646,69 +653,114 @@ function applyMatrixEffect() {
         pointer-events: none;
         z-index: 40;
         overflow: hidden;
-        opacity: 0.15;
+        opacity: 0.2;
     `;
     
     const characters = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
     const columns = Math.floor(window.innerWidth / 30);
     
-    for (let i = 0; i < columns; i++) {
-        const column = document.createElement('div');
-        const duration = Math.random() * 4 + 7.92;
-        column.style.cssText = `
-            position: absolute;
-            top: -100px;
-            left: ${i * 30}px;
-            color: #00ff00;
-            font-family: monospace;
-            font-size: 18px;
-            line-height: 18px;
-            animation: matrixFall ${duration}s linear infinite;
-            animation-delay: -${Math.random() * 8}s;
-            text-shadow: 0 0 8px #00ff00, 0 0 15px #00ff00, 0 0 20px #00ff00;
-        `;
-        
-        let text = '';
-        const length = 35;
-        for (let j = 0; j < length; j++) {
-            const char = characters[Math.floor(Math.random() * characters.length)];
-            if (j < 2 && Math.random() > 0.5) {
-                text += `<span style="color: #ffffff; text-shadow: 0 0 10px #ffffff, 0 0 20px #ffffff, 0 0 30px #ffffff;">${char}</span><br>`;
-            } else {
-                text += `${char}<br>`;
-            }
-        }
-        column.innerHTML = text;
-        matrixContainer.appendChild(column);
-    }
-    
+    // Create style for the matrix effect
     const matrixStyle = document.createElement('style');
     matrixStyle.textContent = `
         @keyframes matrixFall {
-            0% {
-                transform: translateY(-100%);
-                opacity: 0;
-            }
-            10% {
-                opacity: 1;
-            }
-            90% {
-                opacity: 1;
-            }
-            100% {
-                transform: translateY(100%);
-                opacity: 0;
-            }
+            0% { transform: translateY(-100%); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(100%); opacity: 0; }
         }
     `;
     document.head.appendChild(matrixStyle);
     
+    // Create columns
+    for (let i = 0; i < columns; i++) {
+        const column = document.createElement('div');
+        const duration = Math.random() * 4 + 10; // 10-14 seconds duration
+        
+        column.style.cssText = `
+            position: absolute;
+            top: -100px;
+            left: ${i * 30}px;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 18px;
+            line-height: 18px;
+            animation: matrixFall ${duration}s linear infinite;
+            animation-delay: -${Math.random() * 10}s;
+            text-shadow: 0 0 8px #0f0, 0 0 15px #0f0, 0 0 20px #0f0;
+            padding: 0 5px;
+        `;
+        
+        let text = '';
+        const length = 35;
+        
+        for (let j = 0; j < length; j++) {
+            const char = characters[Math.floor(Math.random() * characters.length)];
+            
+            // First few characters have bright wake effect
+            if (j < 6 && Math.random() > 0.3) {
+                const intensity = j === 0 ? 1 : (1 - j/6);
+                const color = j === 0 ? '#fff' : `rgba(255, 255, 255, ${intensity})`;
+                const shadow = j === 0 ? 
+                    '0 0 10px #fff, 0 0 20px #fff, 0 0 30px #0f0' : 
+                    `0 0 ${Math.round(10 * intensity)}px #0f0, 0 0 ${Math.round(15 * intensity)}px #0f0`;
+                
+                text += `<span style="color: ${color}; text-shadow: ${shadow};">${char}</span><br>`;
+            } else {
+                // Regular characters with variable opacity based on position
+                const opacity = Math.max(0.5, 1 - (j / length) * 0.8);
+                text += `<span style="opacity: ${opacity};">${char}</span><br>`;
+            }
+        }
+        
+        column.innerHTML = text;
+        matrixContainer.appendChild(column);
+    }
+    
     document.body.appendChild(matrixContainer);
+    
+    // Set up character changing for a more dynamic effect
+    function changeRandomCharacters() {
+        if (!document.getElementById('matrix-container')) return;
+        
+        const columns = document.querySelectorAll('#matrix-container div');
+        const randomColumn = columns[Math.floor(Math.random() * columns.length)];
+        
+        if (randomColumn) {
+            const spans = randomColumn.querySelectorAll('span');
+            const randomSpanIndex = Math.floor(Math.random() * spans.length);
+            
+            if (spans[randomSpanIndex]) {
+                spans[randomSpanIndex].textContent = characters[Math.floor(Math.random() * characters.length)];
+                
+                // Brief glow effect
+                const originalStyle = spans[randomSpanIndex].style.textShadow;
+                spans[randomSpanIndex].style.textShadow = '0 0 10px #fff, 0 0 20px #0f0, 0 0 30px #0f0';
+                
+                setTimeout(() => {
+                    if (spans[randomSpanIndex]) {
+                        spans[randomSpanIndex].style.textShadow = originalStyle;
+                    }
+                }, 300);
+            }
+        }
+        
+        // Continue the animation loop at a reasonable rate
+        matrixContainer.dataset.animationId = setTimeout(() => {
+            requestAnimationFrame(changeRandomCharacters);
+        }, 100);
+    }
+    
+    // Start the character changing effect
+    changeRandomCharacters();
 }
 
 function removeMatrixEffect() {
     const matrixContainer = document.getElementById('matrix-container');
     if (matrixContainer) {
+        // Cancel the animation timer if it exists
+        if (matrixContainer.dataset.animationId) {
+            clearTimeout(parseInt(matrixContainer.dataset.animationId));
+        }
         matrixContainer.remove();
     }
 }
@@ -1010,9 +1062,48 @@ async function generateDownload() {
             }
         }
         
-        // Create download link
+        // Create download link with effect parameter in URL
         const downloadLink = document.createElement('a');
-        downloadLink.setAttribute('href', 'data:text/html;charset=utf-8,' + encodeURIComponent(templateHtml));
+        
+        // Add the effect as a URL parameter if it's not 'none'
+        if (currentStyles.currentEffect !== 'none') {
+            // Add a script tag to parse URL parameters in the downloaded file
+            const urlParamScript = `
+                <script>
+                // Function to get URL parameters
+                function getUrlParam(name) {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    return urlParams.get(name);
+                }
+                </script>
+            `;
+            
+            // Insert the script before the closing head tag
+            const headEndIndex = templateHtml.indexOf('</head>');
+            if (headEndIndex !== -1) {
+                templateHtml = templateHtml.substring(0, headEndIndex) + 
+                    urlParamScript + 
+                    templateHtml.substring(headEndIndex);
+            }
+            
+            // Add the effect parameter to the data URL
+            // We need to add a query parameter to the HTML content itself
+            // Find the opening <html> tag and add a query parameter to it
+            const htmlTagIndex = templateHtml.indexOf('<html');
+            if (htmlTagIndex !== -1) {
+                const htmlTagEnd = templateHtml.indexOf('>', htmlTagIndex);
+                if (htmlTagEnd !== -1) {
+                    // Insert the effect parameter as a data attribute
+                    templateHtml = templateHtml.substring(0, htmlTagEnd) + 
+                        ` data-effect="${currentStyles.currentEffect}"` + 
+                        templateHtml.substring(htmlTagEnd);
+                }
+            }
+            
+            downloadLink.setAttribute('href', 'data:text/html;charset=utf-8,' + encodeURIComponent(templateHtml));
+        } else {
+            downloadLink.setAttribute('href', 'data:text/html;charset=utf-8,' + encodeURIComponent(templateHtml));
+        }
         
         // Format the filename as <ens or basename>.eth.html
         let filename = ensName.toLowerCase();
@@ -2027,6 +2118,12 @@ function updateNavBar(name, isRegistered) {
             <button id="settings-dropdown-btn" class="dropdown-btn">🏗️</button>
             <div id="settings-dropdown-content" class="dropdown-content">
                 <div class="dropdown-section">
+                    <h4>EFP</h4>
+                    <div class="dropdown-buttons">
+                        <a href="https://efp.app/" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
+                    </div>
+                </div>
+                <div class="dropdown-section">
                     <h4>Design</h4>
                     <div class="dropdown-controls-col">
                         <label class="control-button bg-control">
@@ -2067,12 +2164,6 @@ function updateNavBar(name, isRegistered) {
                     <h4>ENS/Basename</h4>
                     <div class="dropdown-buttons">
                         <a href="https://app.ens.domains/${name}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
-                    </div>
-                </div>
-                <div class="dropdown-section">
-                    <h4>EFP</h4>
-                    <div class="dropdown-buttons">
-                        <a href="https://efp.app/" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
                     </div>
                 </div>
             </div>
@@ -2739,17 +2830,22 @@ async function initializeENSGrid() {
     const profilesNeeded = columnsPerRow * ROWS;
     
     // Create an ordered list of ENS names:
-    // 1. Start with the priority names in their fixed order
-    // 2. Add shuffled non-priority names
-    // 3. Limit to the number needed for the grid
+    // 1. Start with the fixed priority names in their fixed order
+    // 2. Add shuffled randomizable priority names
+    // 3. Add shuffled non-priority names
+    // 4. Limit to the number needed for the grid
     
-    // First, include all priority names
-    const orderedNames = [...PRIORITY_ENS_NAMES];
+    // First, include the fixed priority names
+    const orderedNames = [...FIXED_PRIORITY_ENS_NAMES];
+    
+    // Then shuffle and add the randomizable priority names
+    const shuffledPriorityNames = [...RANDOMIZABLE_PRIORITY_ENS_NAMES].sort(() => Math.random() - 0.5);
+    orderedNames.push(...shuffledPriorityNames);
     
     // Then shuffle and add the remaining names
     const shuffledOtherNames = [...OTHER_ENS_NAMES].sort(() => Math.random() - 0.5);
     
-    // Combine the priority names with the shuffled other names
+    // Combine with the shuffled other names
     orderedNames.push(...shuffledOtherNames);
     
     // Limit to the number of profiles needed for the grid
@@ -3042,23 +3138,34 @@ function setupDropdown() {
     
     if (!dropdownBtn || !dropdownContent) return;
     
-    // Reorder dropdown sections to ensure ENS/Basename is at the top
+    // Reorder dropdown sections to ensure EFP is at the top and ENS/Basename is at the bottom
     function reorderDropdownSections() {
         const sections = dropdownContent.querySelectorAll('.dropdown-section');
         if (sections.length >= 4) {
-            // Find the ENS/Basename section (usually the 3rd one, index 2)
+            // Find the EFP section
+            let efpSection = null;
+            // Find the ENS/Basename section
             let ensSection = null;
+            
             for (let i = 0; i < sections.length; i++) {
                 const heading = sections[i].querySelector('h4');
-                if (heading && heading.textContent.trim() === 'ENS/Basename') {
-                    ensSection = sections[i];
-                    break;
+                if (heading) {
+                    if (heading.textContent.trim() === 'EFP') {
+                        efpSection = sections[i];
+                    } else if (heading.textContent.trim() === 'ENS/Basename') {
+                        ensSection = sections[i];
+                    }
                 }
             }
             
-            // If found, move it to the top
-            if (ensSection && ensSection !== sections[0]) {
-                dropdownContent.insertBefore(ensSection, sections[0]);
+            // If found, move EFP to the top
+            if (efpSection && efpSection !== sections[0]) {
+                dropdownContent.insertBefore(efpSection, sections[0]);
+            }
+            
+            // If found, move ENS/Basename to the bottom
+            if (ensSection) {
+                dropdownContent.appendChild(ensSection);
             }
         }
     }
@@ -3197,10 +3304,55 @@ function setupDropdown() {
     }
 }
 
+// Function to handle cycling words in the slogan
+function initializeCyclingWords() {
+    const cyclingWordElement = document.getElementById('cycling-word');
+    if (!cyclingWordElement) return;
+    
+    const words = ['everything', 'wallet', 'crypto', 'name', 'identity', 'domain', 'website', 'links', 'social graph', 'data', 'home'];
+    let currentIndex = 0;
+    
+    function cycleWords() {
+        // Fade out
+        cyclingWordElement.style.opacity = '0';
+        
+        setTimeout(() => {
+            // Change word
+            currentIndex = (currentIndex + 1) % words.length;
+            cyclingWordElement.textContent = words[currentIndex];
+            
+            // Fade in
+            cyclingWordElement.style.opacity = '1';
+            
+            // If we're on the last word (home), double the display time
+            if (words[currentIndex] === 'home') {
+                clearInterval(cycleInterval);
+                setTimeout(() => {
+                    // Resume normal cycling after double time
+                    cycleInterval = setInterval(cycleWords, 1785);
+                }, 1785);
+            }
+        }, 500); // Wait for fade out to complete
+    }
+    
+    // Store interval ID so we can clear it when needed
+    let cycleInterval;
+    
+    // Set initial word
+    cyclingWordElement.textContent = words[0];
+    cyclingWordElement.style.opacity = '1';
+    
+    // Start cycling
+    cycleInterval = setInterval(cycleWords, 1785); // Change word every 1.785 seconds (15% faster than 2.1 seconds)
+}
+
 // Initialize PWA support when the page loads
 document.addEventListener('DOMContentLoaded', () => {
     // Register service worker for main site
     registerServiceWorker();
+    
+    // Initialize cycling words in slogan
+    initializeCyclingWords();
     
     // Initialize the ENS grid
     initializeENSGrid();

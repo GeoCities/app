@@ -234,27 +234,10 @@
 
         /* EFFECT_STYLES_PLACEHOLDER */
         
-        /* Single Rainbow Effect Definition - No Dynamic Generation */
-        @keyframes rainbowBorder {
-            0% { border-color: #ff0000; }
-            16.666% { border-color: #ff8000; }
-            33.333% { border-color: #ffff00; }
-            50% { border-color: #00ff00; }
-            66.666% { border-color: #0000ff; }
-            83.333% { border-color: #8000ff; }
-            100% { border-color: #ff0000; }
-        }
-        
-        /* Elements will start with no animation, it will be applied via JavaScript */
+        /* Elements will have their default border color unless an effect is applied */
         .nav-logo, .profile-records, .profile-record, .profile-header-image, 
         .footer, .follow-button, .profile-record hr {
-            /* No animation by default */
             border-color: var(--border-color);
-        }
-        
-        /* Class to apply rainbow effect */
-        .rainbow-active {
-            animation: rainbowBorder 3s linear infinite;
         }
     </style>
 </head>
@@ -394,10 +377,44 @@
         function applyRainbowEffect() {
             console.log('Applying rainbow effect immediately');
             
+            // First, add the CSS for the rainbow effect if it doesn't exist yet
+            if (!document.getElementById('rainbow-effect-style')) {
+                const styleElement = document.createElement('style');
+                styleElement.id = 'rainbow-effect-style';
+                styleElement.textContent = `
+                    @keyframes rainbowBorder {
+                        0% { border-color: #ff0000; }
+                        16.666% { border-color: #ff8000; }
+                        33.333% { border-color: #ffff00; }
+                        50% { border-color: #00ff00; }
+                        66.666% { border-color: #0000ff; }
+                        83.333% { border-color: #8000ff; }
+                        100% { border-color: #ff0000; }
+                    }
+                    
+                    .rainbow-active {
+                        animation: rainbowBorder 3s linear infinite;
+                    }
+                `;
+                document.head.appendChild(styleElement);
+            }
+            
+            // First remove any existing effect classes
+            removeAllEffects();
+            
             // Apply to all elements at once
             const elements = document.querySelectorAll('.nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .profile-record hr');
             elements.forEach(el => {
                 el.classList.add('rainbow-active');
+            });
+        }
+        
+        // Function to remove all effects
+        function removeAllEffects() {
+            // Remove rainbow effect
+            const rainbowElements = document.querySelectorAll('.rainbow-active');
+            rainbowElements.forEach(el => {
+                el.classList.remove('rainbow-active');
             });
         }
         
@@ -612,9 +629,14 @@
                     followButton.href = `https://efp.app/${ENS_NAME}`;
                 }
                 
-                // Apply rainbow effect regardless of images loading
-                // This simplified approach will just apply the effect after profile data is loaded
-                applyRainbowEffect();
+                // Make sure to remove any existing effects first
+                removeAllEffects();
+                
+                // Only apply the selected effect
+                if (window.pendingEffect === 'rainbow') {
+                    applyRainbowEffect();
+                }
+                // Add other effects here as needed (snow, stars, etc.)
                 
                 // Hide loading spinner after everything is loaded
                 hideLoading();
@@ -627,8 +649,17 @@
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
-            // Always apply rainbow effect for downloaded files
-            window.pendingEffect = 'rainbow';
+            // Check for effect data attribute in the HTML tag
+            const htmlTag = document.documentElement;
+            const effectAttribute = htmlTag.getAttribute('data-effect');
+            
+            // Only set the effect if it's specified in the data attribute
+            if (effectAttribute && effectAttribute !== 'none') {
+                window.pendingEffect = effectAttribute;
+            } else {
+                // Make sure no effect is applied if none was selected
+                window.pendingEffect = 'none';
+            }
             
             // Initialize the profile
             loadProfile();
