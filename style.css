@@ -876,6 +876,21 @@ h1#homepage-geocities {
 }
 /* --- End of content previously in JS-managed styleSheet --- */
 
+/* Matrix effect container styles */
+#matrix-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1; /* Ensure it's behind other content */
+    opacity: 0.5; /* Adjust as needed */
+    pointer-events: none; /* Allow interaction with elements behind it */
+    overflow: hidden; /* Hide overflowing characters */
+}
+
 /* Add these animations at the end of the file */
 
 /* Effect animations */

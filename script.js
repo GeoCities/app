@@ -653,11 +653,11 @@ function applyMatrixEffect() {
         pointer-events: none;
         z-index: 40;
         overflow: hidden;
-        opacity: 0.35;
+        opacity: 0.5; /* Adjusted opacity */
     `;
     
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
-    const columns = Math.floor(window.innerWidth / 30);
+    const columns = Math.floor(window.innerWidth / 20); /* Adjusted column calculation */
     
     // Create style for the matrix effect
     const matrixStyle = document.createElement('style');
@@ -665,8 +665,8 @@ function applyMatrixEffect() {
         @keyframes matrixFall {
             0% { transform: translateY(-100%); opacity: 0; }
             10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { transform: translateY(100%); opacity: 0; }
+            70% { opacity: 1; } /* Adjusted keyframes */
+            100% { transform: translateY(100vh); opacity: 0; } /* Adjusted keyframes */
         }
     `;
     document.head.appendChild(matrixStyle);
@@ -674,41 +674,41 @@ function applyMatrixEffect() {
     // Create columns
     for (let i = 0; i < columns; i++) {
         const column = document.createElement('div');
-        const duration = Math.random() * 4 + 4; // 4-8 seconds duration
+        const duration = Math.random() * 6 + 8; /* Adjusted duration */
         
         column.style.cssText = `
             position: absolute;
-            top: -100px;
-            left: ${i * 16}px;
+            top: -100px; /* Keep starting position */
+            left: ${i * 20}px; /* Adjusted spacing */
             color: #22FF22;
             font-family: monospace;
-            font-size: 14px;
-            line-height: 14px;
+            font-size: 16px; /* Adjusted font size */
+            line-height: 16px; /* Adjusted line height */
             animation: matrixFall ${duration}s linear infinite;
-            animation-delay: -${Math.random() * 10}s;
+            animation-delay: -${Math.random() * 10}s; /* Keep delay */
             text-shadow: 0 0 8px #22FF22, 0 0 15px #22FF22, 0 0 20px #22FF22;
-            padding: 0 5px;
+            padding: 0 5px; /* Keep padding */
         `;
         
         let text = '';
-        const length = 60;
+        const length = 60; // Keep column length
         
         for (let j = 0; j < length; j++) {
             const char = characters[Math.floor(Math.random() * characters.length)];
+            const opacity = Math.max(0.1, 1 - (j / length)); /* Adjusted opacity logic */
             
-            // First few characters have bright wake effect
-            if (j < 6 && Math.random() > 0.3) {
-                const intensity = j === 0 ? 1 : (1 - j/6);
-                const color = j === 0 ? '#E0FFE0' : `rgba(255, 255, 255, ${intensity})`;
-                const shadow = j === 0 ? 
-                    '0 0 5px #E0FFE0, 0 0 15px #E0FFE0, 0 0 25px #80FF80, 0 0 35px #22FF22' :
-                    `0 0 ${Math.round(10 * intensity)}px #22FF22, 0 0 ${Math.round(15 * intensity)}px #22FF22`;
-                
-                text += `<span style="color: ${color}; text-shadow: ${shadow};">${char}</span><br>`;
+            // Refined bright wake effect
+            if (j === 0) {
+                text += `<span style="color: #FFFFFF; text-shadow: 0 0 5px #E0FFE0, 0 0 15px #E0FFE0, 0 0 25px #80FF80, 0 0 35px #22FF22; opacity: 1;">${char}</span><br>`;
+            } else if (j === 1) {
+                text += `<span style="color: #E0FFE0; text-shadow: 0 0 5px #22FF22, 0 0 10px #22FF22; opacity: ${opacity};">${char}</span><br>`;
+            } else if (j === 2) {
+                text += `<span style="color: #C0FFC0; text-shadow: 0 0 5px #22FF22; opacity: ${opacity};">${char}</span><br>`;
+            } else if (j >= 3 && j <= 5) {
+                text += `<span style="color: #A0FFA0; opacity: ${opacity};">${char}</span><br>`;
             } else {
-                // Regular characters with variable opacity based on position
-                const opacity = Math.max(0.5, 1 - (j / length) * 0.8);
-                text += `<span style="opacity: ${opacity};">${char}</span><br>`;
+                // Standard characters
+                text += `<span style="color: #22FF22; opacity: ${opacity};">${char}</span><br>`;
             }
         }
         
@@ -747,7 +747,7 @@ function applyMatrixEffect() {
         // Continue the animation loop at a reasonable rate
         matrixContainer.dataset.animationId = setTimeout(() => {
             requestAnimationFrame(changeRandomCharacters);
-        }, 200);
+        }, 50); /* Adjusted character change frequency */
     }
     
     // Start the character changing effect
@@ -1267,20 +1267,10 @@ function generateEffectStyles(effectName) {
         case 'matrix':
             return `
                 @keyframes matrixFall {
-                    0% {
-                        transform: translateY(-100%);
-                        opacity: 0;
-                    }
-                    10% {
-                        opacity: 1;
-                    }
-                    90% {
-                        opacity: 1;
-                    }
-                    100% {
-                        transform: translateY(100%);
-                        opacity: 0;
-                    }
+            0% { transform: translateY(-100%); opacity: 0; }
+            10% { opacity: 1; }
+            70% { opacity: 1; } /* Adjusted keyframes */
+            100% { transform: translateY(100vh); opacity: 0; } /* Adjusted keyframes */
                 }
 
                 .matrix-effect {
@@ -1290,21 +1280,21 @@ function generateEffectStyles(effectName) {
                     right: 0;
                     bottom: 0;
                     pointer-events: none;
-                    z-index: 40;
+            z-index: 40; /* Keep z-index */
                     overflow: hidden;
-                    opacity: 0.15;
+            opacity: 0.5; /* Adjusted opacity to match the one in applyMatrixEffect */
                 }
 
                 .matrix-column {
                     position: absolute;
-                    top: -100px;
-                    color: #00ff00;
+            top: -100px; /* Keep starting position */
+            color: #22FF22; /* Standard color from applyMatrixEffect */
                     font-family: monospace;
-                    font-size: 18px;
-                    line-height: 18px;
-                    white-space: nowrap;
-                    text-shadow: 0 0 8px #00ff00, 0 0 15px #00ff00, 0 0 20px #00ff00;
-                    animation: matrixFall linear infinite;
+            font-size: 16px; /* Adjusted font size */
+            line-height: 16px; /* Adjusted line height */
+            white-space: nowrap; /* Keep nowrap */
+            text-shadow: 0 0 8px #22FF22, 0 0 15px #22FF22, 0 0 20px #22FF22; /* Standard shadow */
+            animation: matrixFall linear infinite; /* Duration will be set in JS */
                 }
             `;
         case 'glow':
