@@ -2814,10 +2814,22 @@ async function createPWAIcons(avatarUrl) {
     }
 }
 
+// Track if the grid has been initialized
+let gridInitialized = false;
+
 // Function to initialize and populate the ENS grid
 async function initializeENSGrid() {
     const ensGrid = document.getElementById('ens-grid');
     if (!ensGrid) return;
+    
+    // If the grid is already being initialized or has been initialized, return
+    if (gridInitialized) {
+        console.log('Grid already initialized, skipping duplicate initialization');
+        return;
+    }
+    
+    // Mark that we're starting initialization
+    gridInitialized = true;
     
     // Clear any existing content
     ensGrid.innerHTML = '';
@@ -2849,59 +2861,69 @@ async function initializeENSGrid() {
         });
     }
     
-    // Wait for CSS to be loaded
-    await ensureCssLoaded();
-    
-    // Determine how many columns we have based on the current CSS
-    const columnsPerRow = getColumnsPerRow();
-    
-    // Display 10 rows, with the number of columns determined by the responsive layout
-    const ROWS = 10;
-    const profilesNeeded = columnsPerRow * ROWS;
-    
-    // Create an ordered list of ENS names:
-    // 1. Start with the fixed priority names in their fixed order
-    // 2. Add shuffled randomizable priority names
-    // 3. Add shuffled non-priority names
-    // 4. Limit to the number needed for the grid
-    
-    // First, include the fixed priority names
-    const orderedNames = [...FIXED_PRIORITY_ENS_NAMES];
-    
-    // Then shuffle and add the randomizable priority names
-    const shuffledPriorityNames = [...RANDOMIZABLE_PRIORITY_ENS_NAMES].sort(() => Math.random() - 0.5);
-    orderedNames.push(...shuffledPriorityNames);
-    
-    // Then shuffle and add the remaining names
-    const shuffledOtherNames = [...OTHER_ENS_NAMES].sort(() => Math.random() - 0.5);
-    
-    // Combine with the shuffled other names
-    orderedNames.push(...shuffledOtherNames);
-    
-    // Limit to the number of profiles needed for the grid
-    const limitedNames = orderedNames.slice(0, profilesNeeded);
-    
-    // Create and append ENS profile elements
-    const profileElements = [];
-    
-    // First create all profile elements with default avatars
-    for (const ensName of limitedNames) {
-        const profileElement = createENSProfileElement(ensName);
-        ensGrid.appendChild(profileElement);
-        profileElements.push(profileElement);
-    }
-    
-    // Set up lazy loading for the avatar images
-    setupLazyLoading();
-    
-    // Add window resize listener to update the grid when screen size changes
-    window.addEventListener('resize', debounce(() => {
-        // Only reinitialize if the column count has changed
-        const newColumnsPerRow = getColumnsPerRow();
-        if (newColumnsPerRow !== columnsPerRow) {
-            initializeENSGrid();
+    try {
+        // Wait for CSS to be loaded
+        await ensureCssLoaded();
+        
+        // Determine how many columns we have based on the current CSS
+        const columnsPerRow = getColumnsPerRow();
+        
+        // Display 10 rows, with the number of columns determined by the responsive layout
+        const ROWS = 10;
+        const profilesNeeded = columnsPerRow * ROWS;
+        
+        // Create an ordered list of ENS names:
+        // 1. Start with the fixed priority names in their fixed order
+        // 2. Add shuffled randomizable priority names
+        // 3. Add shuffled non-priority names
+        // 4. Limit to the number needed for the grid
+        
+        // First, include the fixed priority names
+        const orderedNames = [...FIXED_PRIORITY_ENS_NAMES];
+        
+        // Then shuffle and add the randomizable priority names
+        const shuffledPriorityNames = [...RANDOMIZABLE_PRIORITY_ENS_NAMES].sort(() => Math.random() - 0.5);
+        orderedNames.push(...shuffledPriorityNames);
+        
+        // Then shuffle and add the remaining names
+        const shuffledOtherNames = [...OTHER_ENS_NAMES].sort(() => Math.random() - 0.5);
+        
+        // Combine with the shuffled other names
+        orderedNames.push(...shuffledOtherNames);
+        
+        // Limit to the number of profiles needed for the grid
+        const limitedNames = orderedNames.slice(0, profilesNeeded);
+        
+        // Create and append ENS profile elements
+        const profileElements = [];
+        
+        // First create all profile elements with default avatars
+        for (const ensName of limitedNames) {
+            const profileElement = createENSProfileElement(ensName);
+            ensGrid.appendChild(profileElement);
+            profileElements.push(profileElement);
         }
-    }, 250));
+        
+        // Set up lazy loading for the avatar images
+        setupLazyLoading();
+        
+        // Add window resize listener to update the grid when screen size changes
+        window.addEventListener('resize', debounce(() => {
+            // Only reinitialize if the column count has changed
+            const newColumnsPerRow = getColumnsPerRow();
+            if (newColumnsPerRow !== columnsPerRow) {
+                // Reset the initialization flag to allow recreating the grid on resize
+                gridInitialized = false;
+                initializeENSGrid();
+            }
+        }, 250));
+        
+        console.log('ENS Grid initialized successfully');
+    } catch (error) {
+        console.error('Error initializing ENS grid:', error);
+        // Reset the flag if initialization fails
+        gridInitialized = false;
+    }
 }
 
 // Function to create an ENS profile element
