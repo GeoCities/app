@@ -653,7 +653,7 @@ function applyMatrixEffect() {
         pointer-events: none;
         z-index: 40;
         overflow: hidden;
-        opacity: 0.2;
+        opacity: 0.35;
     `;
     
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
@@ -680,13 +680,13 @@ function applyMatrixEffect() {
             position: absolute;
             top: -100px;
             left: ${i * 16}px;
-            color: #0f0;
+            color: #22FF22;
             font-family: monospace;
             font-size: 14px;
             line-height: 14px;
             animation: matrixFall ${duration}s linear infinite;
             animation-delay: -${Math.random() * 10}s;
-            text-shadow: 0 0 8px #0f0, 0 0 15px #0f0, 0 0 20px #0f0;
+            text-shadow: 0 0 8px #22FF22, 0 0 15px #22FF22, 0 0 20px #22FF22;
             padding: 0 5px;
         `;
         
@@ -699,10 +699,10 @@ function applyMatrixEffect() {
             // First few characters have bright wake effect
             if (j < 6 && Math.random() > 0.3) {
                 const intensity = j === 0 ? 1 : (1 - j/6);
-                const color = j === 0 ? '#c0ffc0' : `rgba(255, 255, 255, ${intensity})`;
+                const color = j === 0 ? '#E0FFE0' : `rgba(255, 255, 255, ${intensity})`;
                 const shadow = j === 0 ? 
-                    '0 0 10px #fff, 0 0 20px #fff, 0 0 30px #0f0' : 
-                    `0 0 ${Math.round(10 * intensity)}px #0f0, 0 0 ${Math.round(15 * intensity)}px #0f0`;
+                    '0 0 5px #E0FFE0, 0 0 15px #E0FFE0, 0 0 25px #80FF80, 0 0 35px #22FF22' :
+                    `0 0 ${Math.round(10 * intensity)}px #22FF22, 0 0 ${Math.round(15 * intensity)}px #22FF22`;
                 
                 text += `<span style="color: ${color}; text-shadow: ${shadow};">${char}</span><br>`;
             } else {
@@ -747,7 +747,7 @@ function applyMatrixEffect() {
         // Continue the animation loop at a reasonable rate
         matrixContainer.dataset.animationId = setTimeout(() => {
             requestAnimationFrame(changeRandomCharacters);
-        }, 150);
+        }, 200);
     }
     
     // Start the character changing effect
