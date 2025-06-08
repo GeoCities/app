@@ -1,34 +1,38 @@
-# GeoCities.eth User Guide
+# GeoCities
 
 ## Introduction
 
-GeoCities.eth is a modern revival of the original GeoCities, offering homepages for the cypherpunk internet. Built on Web3 principles, it provides tools for searching, registering, and managing decentralized .eth domains and Basenames, with content creation and hosting powered by blockchain technology. This guide covers how to use GeoCities.eth to search names, create profiles, design websites, and deploy content.
+GeoCities is a modern revival of the original GeoCities, offering homepages for the cypherpunk internet. 
+
+These docs cover how to use GeoCities to search the cypherpunk internet, register ENS and Basenames, manage ENS records, Follow ENS/Basenames, and deploy decentralized websites and content connected to ENS/Basenames.
 
 ### GeoCities History
 
 GeoCities was the original home for user-generated content on the internet, offering free hosting and creation tools. In 2020, Yahoo’s GeoCities trademark was canceled in the US for non-use. In 2021, GeoCities.eth was registered on the Ethereum Name Service (ENS), launched, and filed for a new trademark, granted by the USPTO in 2022. The brand has since secured the “GeoCities” username on platforms like Instagram, Threads, GitHub, Linktree, TikTok, Reddit, Twitch, Kick, Truth Social, Digg, and Farcaster, reestablishing its presence for the decentralized web.
 
+If you don't believe me or don't get it, I don't have time to try to convince you, sorry. 
+
 ## Prerequisites
 
-- A modern web browser (e.g., Chrome, Firefox) with JavaScript enabled.
-- An Ethereum wallet (e.g., MetaMask) for registering names or deploying content.
+- A modern web browser (e.g., Chrome, safari) with JavaScript enabled.
+- An Ethereum wallet (e.g., MetaMask, Coinbase Wallet) for registering names, managing records, and deploying content.
 - Basic understanding of ENS, Basenames, and IPFS (optional for advanced features).
 
 ## Getting Started
 
-### Accessing GeoCities.eth
+### Accessing GeoCities
 
-1. Navigate to [geocities.eth.link](http://geocities.eth.link).
+1. Navigate to [geocities.eth.limo](http://geocities.eth.limo) or [geocities.eth.link](http://geocities.eth.link).
 2. Verify JavaScript is enabled for full functionality.
 3. Explore the homepage, featuring a search bar, navigation menu, and featured .eth domains.
 
-![GeoCities.eth.link](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1314.png)
+![GeoCities Homepage](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1314.png)
 
 ## Key Features
 
 ### Bring Your Own ID (BYOID)
 
-GeoCities.eth supports decentralized identities:
+GeoCities supports decentralized identities:
 
 - **ENS**: Ethereum Name Service domains (e.g., example.eth).
 - **Basename**: Subdomains on the Base network (e.g., example.base.eth).
@@ -138,7 +142,7 @@ Link your website to your ENS/Basename:
 
 - **Search Not Working**: Ensure the name is correctly formatted (e.g., `example.eth`). Try refreshing the page.
 - **Profile Not Displaying**: Verify ENS/Basename records are updated in the respective manager.
-- **Deployment Errors**: Check IPFS service status (e.g., Web Vault, Pinata) or ensure your wallet is connected.
+- **Deployment Errors**: Check IPFS service status (e.g., HashVault, Pinata) or ensure your wallet is connected.
 - **JavaScript Issues**: Enable JavaScript in your browser settings.
 
 ## Additional Resources
