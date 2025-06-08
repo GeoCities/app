@@ -85,7 +85,7 @@ To edit a profile:
      - [Base Documentation for Editing Records](https://docs.base.org)
 ![Basename Records](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1343.jpeg)
 
-### Using the 🏗️ Menu
+### 🏗️ 
 
 The 🏗️ menu provides tools for designing and deploying websites.
 
@@ -137,10 +137,11 @@ Link your website to your ENS/Basename:
 - **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13) (not currently available on Basename website).
 ![Basename Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1371.png)
 
-### Coming Soon
+### 🪙
+GeoCities crypto wallet coming soon.
 
-#### 🪙 Crypto Wallet 
-#### 🤖 AI & Autonomous Agents
+### 🤖
+GeoCities AI & Autonomous Agents coming soon.
 
 ## Troubleshooting
 
