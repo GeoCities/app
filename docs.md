@@ -54,15 +54,16 @@ If a searched name is unregistered:
 ![Register button base](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1348.png)
 ![Register button ENS](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1350.png)
 
-   - **ENS**: Redirects to the [ENS Manager](https://app.ens.domains) ([ENS Documentation](https://docs.ens.domains)).
- ![ENS register](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1349.png)
+2. ENS/Basename
+ - **ENS**: Redirects to the [ENS Manager](https://app.ens.domains) ([ENS Documentation](https://docs.ens.domains)).
+![ENS register](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1349.png)
   - **Basename**: Redirects to the [Basename Website](https://www.base.org/names) ([Basename Documentation](https://docs.base.org)).
 ![Basename Register](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1351.png)
 3. Follow the respective platform’s instructions to register the name, including costs (refer to linked documentation).
 
 ### ENS/Basename Profiles
 
-Registered ENS/Basename profiles are automatically generated from ENS “records,” including:
+Registered ENS/Basename profiles are automatically generated from “records” including:
 
 - **Avatar**: Profile image set in ENS records.
 - **Header**: Banner image or text.
