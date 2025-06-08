@@ -78,10 +78,12 @@ To edit a profile:
 
 1. Click the **Edit Records** button on the profile
 2. Update Records:
-   - **ENS**: Links to [ENS Manager](https://app.ens.domains) ([ENS Documentation for Editing Records](https://docs.ens.domains/v3/user-guides/manage-records)).
-![Search Bar Screenshot](images/search-bar.png)
-   - **Basename**: Links to [Basename Website](https://www.base.org/names) ([Base Documentation for Editing Records](https://docs.base.org)).
-![Search Bar Screenshot](images/search-bar.png)
+   - **ENS**: Links to [ENS Manager](https://app.ens.domains)
+     - [ENS Documentation for Editing Records](https://docs.ens.domains/v3/user-guides/manage-records)
+![ENS Records](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1369.png)
+   - **Basename**: Links to [Basename Website](https://www.base.org/names)
+     - [Base Documentation for Editing Records](https://docs.base.org)
+![Basename Records](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1343.jpeg)
 
 ### Using the 🏗️ Menu
 
@@ -129,15 +131,16 @@ Create and deploy a decentralized website:
 #### Connect
 Link your website to your ENS/Basename:
 
-- **ENS**: Links to [ENS Manager](https://app.ens.domains) ([ENS Documentation for Adding Content Hash](https://docs.ens.domains/v3/user-guides/add-content-hash)).
+- **ENS**: Links to [ENS Manager](https://app.ens.domains)
+  - [ENS Documentation for Adding Content Hash](https://docs.ens.domains/v3/user-guides/add-content-hash)
 ![ENS Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1369.png)
-- **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13)) (not currently available on Basename website).![Search Bar Screenshot](images/search-bar.png)
-![Basename Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1371.png))
+- **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13) (not currently available on Basename website).
+![Basename Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1371.png)
 
 ### Coming Soon
 
-- **🪙 Crypto Wallet**: Learn how to set up and use a crypto wallet for GeoCities.eth.
-- **🤖 Autonomous Agent**: Understand how autonomous agents interact with GeoCities.eth.
+**🪙 Crypto Wallet**: Learn how to set up and use a crypto wallet for GeoCities.eth.
+**🤖 AI & Autonomous Agents**: Understand how autonomous agents interact with GeoCities.eth.
 
 ## Troubleshooting
 
