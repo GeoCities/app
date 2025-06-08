@@ -128,7 +128,7 @@ Create and deploy a decentralized website:
      - [Fleek](https://fleek.co) ([Fleek Documentation](https://docs.fleek.co)).
    - GeoCities IPFS deployment: Coming soon.
 
-#### Connect
+3. **Connect**:
 Link your website to your ENS/Basename:
 
 - **ENS**: Links to [ENS Manager](https://app.ens.domains)
@@ -139,8 +139,8 @@ Link your website to your ENS/Basename:
 
 ### Coming Soon
 
-**🪙 Crypto Wallet**: Learn how to set up and use a crypto wallet for GeoCities.eth.
-**🤖 AI & Autonomous Agents**: Understand how autonomous agents interact with GeoCities.eth.
+#### 🪙 Crypto Wallet 
+#### 🤖 AI & Autonomous Agents
 
 ## Troubleshooting
 
