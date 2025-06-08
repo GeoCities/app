@@ -2101,6 +2101,17 @@ function updateNavBar(name, isRegistered) {
     if (name !== 'home' && isRegistered) {
         // Log the name for debugging
         console.log('Profile name for links:', name);
+
+        // Determine if the profile is ENS or Basename
+        const isBasename = name.endsWith('.base.eth');
+        const profileType = isBasename ? 'Basename' : 'ENS';
+        const editRecordsLink = isBasename
+            ? `https://www.base.org/name/${name.replace('.base.eth', '')}`
+            : `https://app.ens.domains/${name}`;
+        const connectLink = isBasename
+            ? 'https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13'
+            : `https://app.ens.domains/${name}`;
+
         // Create dropdown with updated structure
         const dropdown = document.createElement('div');
         dropdown.className = 'dropdown';
@@ -2147,13 +2158,13 @@ function updateNavBar(name, isRegistered) {
                     <div class="dropdown-buttons">
                         <a href="#" class="dropdown-button download-website-button" id="nav-download-website">Download</a>
                         <a href="https://hashvault.xyz" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy</a>
-                        <a href="https://app.ens.domains/${name}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect</a>
+                        <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect</a>
                     </div>
                 </div>
                 <div class="dropdown-section">
-                    <h4>ENS/Basename</h4>
+                    <h4>${profileType}</h4>
                     <div class="dropdown-buttons">
-                        <a href="https://app.ens.domains/${name}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
+                        <a href="${editRecordsLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
                     </div>
                 </div>
             </div>
