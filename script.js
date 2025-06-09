@@ -7,9 +7,10 @@ const DEFAULT_AVATAR = 'https://raw.githubusercontent.com/GeoCities/Ads/main/Ads
 const FIXED_PRIORITY_ENS_NAMES = [
     'ens.eth',           // Always 1st
     'geocities.eth',     // Always 2nd
-    'efp.eth',           // Always 3rd
-    'base.eth',          // Always 4th
-    'enspunks.eth',      // Always 5th
+    'geocities.base.eth', // Always 3rd
+    'efp.eth',           // Always 4th
+    'base.eth',          // Always 5th
+    'enspunks.eth',      // Always 6th
 ];
 
 // Priority ENS names that will be randomized on each page load

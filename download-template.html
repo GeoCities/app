@@ -233,9 +233,52 @@
         }
 
         /* EFFECT_STYLES_PLACEHOLDER */
+
+    .profile-number-records {
+        width: 100%;
+        border: 1px solid var(--border-color);
+        box-sizing: border-box;
+        background-color: var(--background-color);
+        margin-top: 20px; /* Add some space above it */
+    }
+
+    .profile-number-records .profile-record { /* Style records within this new container */
+        padding: 15px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+    }
+
+    .profile-number-records .profile-record:last-child {
+        border-bottom: none;
+    }
+
+    .profile-number-records .record-label {
+        font-weight: bold;
+        min-width: 100px;
+        padding-right: 10px;
+    }
+
+    .profile-number-records .record-value {
+        flex: 1;
+        word-break: break-word;
+    }
+
+    .profile-number-records .record-value a {
+        color: inherit;
+        text-decoration: underline;
+    }
+
+    .profile-number-records .record-value img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin-top: 5px; /* Optional: add some space if it's an image */
+    }
         
         /* Elements will have their default border color unless an effect is applied */
-        .nav-logo, .profile-records, .profile-record, .profile-header-image, 
+        .nav-logo, .profile-records, .profile-number-records, .profile-record, .profile-header-image,
         .footer, .follow-button, .profile-record hr {
             border-color: var(--border-color);
         }
@@ -259,6 +302,9 @@
                 <div class="record-label">Name:</div>
                 <div class="record-value">ENS_NAME_TITLE_PLACEHOLDER</div>
             </div>
+        </div>
+        <div class="profile-number-records" style="display: none;">
+            <!-- Numbered records will be dynamically inserted here -->
         </div>
     </div>
 
@@ -337,6 +383,60 @@
             return valueElement; // Return the value element for reference
         }
 
+        function addNumberRecord(label, value) {
+            const recordsContainer = document.querySelector('.profile-number-records');
+            if (!recordsContainer) return;
+
+            const recordDiv = document.createElement('div');
+            recordDiv.className = 'profile-record'; // Use the same class for consistent styling
+
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'record-label';
+            labelDiv.textContent = label;
+
+            const valueDiv = document.createElement('div');
+            valueDiv.className = 'record-value';
+
+            // Image handling
+            const isImage = typeof value === 'string' && (
+                value.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ||
+                value.startsWith('https://i.imgur.com/') ||
+                value.startsWith('https://ipfs.io/') ||
+                value.includes('cloudfront.net') ||
+                value.includes('nftstorage.link')
+            );
+
+            if (isImage) {
+                const img = document.createElement('img');
+                img.src = value;
+                img.alt = `Record ${label}`; // Accessibility
+                // CSS will handle max-width and height: auto from the new styles
+                img.style.display = 'block'; // Ensure image is block for margin auto if needed
+                img.loading = 'lazy'; // Lazy load images
+
+                // Optional: Add error handling for broken image links
+                img.onerror = () => {
+                    img.remove(); // Remove broken image
+                    valueDiv.textContent = value; // Fallback to showing the URL as text
+                };
+                valueDiv.appendChild(img);
+            } else if (typeof value === 'string' && (value.startsWith('http://') || value.startsWith('https://'))) {
+                // Handle other URLs as clickable links
+                const link = document.createElement('a');
+                link.href = value;
+                link.textContent = value;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                valueDiv.appendChild(link);
+            } else {
+                valueDiv.textContent = value; // Display as plain text
+            }
+
+            recordDiv.appendChild(labelDiv);
+            recordDiv.appendChild(valueDiv);
+            recordsContainer.appendChild(recordDiv);
+        }
+
         function normalizeUrl(url) {
             if (!url) return '';
             url = url.trim();
@@ -403,7 +503,7 @@
             removeAllEffects();
             
             // Apply to all elements at once
-            const elements = document.querySelectorAll('.nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .profile-record hr');
+            const elements = document.querySelectorAll('.nav-logo, .profile-records, .profile-number-records, .profile-record, .profile-header-image, .footer, .follow-button, .profile-record hr');
             elements.forEach(el => {
                 el.classList.add('rainbow-active');
             });
@@ -472,6 +572,42 @@
                 }
                 
                 const data = await response.json();
+
+                // --- Start of new logic for numbered records ---
+                if (data.records) {
+                    const numberRecordsData = [];
+                    const numberRecordsContainer = document.querySelector('.profile-number-records');
+
+                    // Find all records with numeric keys
+                    Object.entries(data.records).forEach(([key, value]) => {
+                        if (/^\d+$/.test(key)) {
+                            numberRecordsData.push({
+                                key: parseInt(key, 10), // Store key as integer for correct sorting
+                                value
+                            });
+                        }
+                    });
+
+                    // Sort number records in reverse numerical order (highest key first)
+                    numberRecordsData.sort((a, b) => b.key - a.key);
+
+                    // If there are number records, make the container visible
+                    // and prepare to add them (actual adding will be in addNumberRecord function)
+                    if (numberRecordsData.length > 0 && numberRecordsContainer) {
+                        numberRecordsContainer.innerHTML = ''; // Clear any potential placeholder content
+                        numberRecordsContainer.style.display = 'block';
+
+                        // Store sorted records for the next step (or pass to a display function)
+                        // For now, we'll just log it. The next plan step will create addNumberRecord.
+                        numberRecordsData.forEach(record => {
+                            addNumberRecord(record.key.toString(), record.value);
+                        });
+                        // In the next step, we will iterate here and call addNumberRecord for each.
+                    } else if (numberRecordsContainer) {
+                        numberRecordsContainer.style.display = 'none'; // Keep it hidden if no records
+                    }
+                }
+                // --- End of new logic for numbered records ---
                 
                 // Update avatar - dynamically fetched from the API
                 if (data.avatar) {
