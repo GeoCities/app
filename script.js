@@ -1026,9 +1026,21 @@ async function generateDownload() {
         let templateHtml = await response.text();
         
         // Replace placeholders in the template
-        templateHtml = templateHtml.replace(/ENS_NAME_TITLE_PLACEHOLDER/g, ensName);
+        templateHtml = templateHtml.replace(/ENS_NAME_TITLE_PLACEHOLDER/g, ensName); // Used for page title and raw-profile-name span
         templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
         templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
+
+        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
+        let profileAddress = '[Address not found]';
+        // data.address is not directly available here. We rely on it being set in the dataset of coin-dropdown-content by displayProfile.
+        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
+            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
+        } else {
+            console.warn("generateDownload: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
+        }
+        // The template will fetch its own address. Set a placeholder.
+        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
+        // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template, so no replacement needed here.
         
         // Add CSS variables for colors
         const cssVariables = `
@@ -1186,10 +1198,21 @@ async function downloadUsingXHR() {
                         let templateHtml = xhr.responseText;
                         
                         // Replace placeholders
-                        templateHtml = templateHtml.replace(/<!--ENS_NAME_TITLE_PLACEHOLDER-->/g, ensName);
-                        templateHtml = templateHtml.replace(/<!--FAVICON_SRC_PLACEHOLDER-->/g, avatarUrl);
-                        templateHtml = templateHtml.replace(/<!--AVATAR_SRC_PLACEHOLDER-->/g, avatarUrl);
+                        templateHtml = templateHtml.replace(/ENS_NAME_TITLE_PLACEHOLDER/g, ensName);
+                        templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
+                        templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
                         
+                        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
+                        let profileAddress = '[Address not found]';
+                        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
+                            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
+                        } else {
+                             console.warn("downloadUsingXHR: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
+                        }
+                        // The template will fetch its own address. Set a placeholder.
+                        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
+                        // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template.
+
                         // Add CSS variables for colors
                         const cssVariables = `
                             --primary-color: ${currentStyles.textColor};
@@ -1260,7 +1283,7 @@ function generateEffectStyles(effectName) {
     switch(effectName) {
         case 'neon':
             return `
-                .nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .search-button, .search-input, .color-button, .effect-select, .control-button, .download-website-button, .deploy-website-button, .connect-website-button {
+                .nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .search-button, .search-input, .color-button, .effect-select, .control-button, .download-website-button, .deploy-website-button, .connect-website-button, .dropdown-btn, .dropdown-content, .dropdown-button {
                     box-shadow: 0 0 5px var(--border-color), 0 0 10px var(--border-color);
                     text-shadow: 0 0 5px var(--border-color), 0 0 10px var(--border-color);
                 }
@@ -1300,7 +1323,7 @@ function generateEffectStyles(effectName) {
             `;
         case 'glow':
             return `
-                .nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .search-button, .search-input, .color-button, .effect-select, .control-button, .download-website-button, .deploy-website-button, .connect-website-button {
+                .nav-logo, .profile-records, .profile-record, .profile-header-image, .footer, .follow-button, .search-button, .search-input, .color-button, .effect-select, .control-button, .download-website-button, .deploy-website-button, .connect-website-button, .dropdown-btn, .dropdown-content, .dropdown-button {
                     box-shadow: 0 0 5px var(--border-color), 0 0 10px var(--border-color);
                 }
             `;
@@ -1831,6 +1854,22 @@ function displayProfile(data, ensName) {
     
     // Add Follow button to nav bar for registered profiles
     updateNavBar(ensName, true);
+
+    // Store address and profile type for coin dropdown, if the dropdown content element exists
+    const coinDropdownContent = document.getElementById('coin-dropdown-content');
+    if (coinDropdownContent) {
+        if (data.address) {
+            coinDropdownContent.dataset.address = data.address;
+            coinDropdownContent.dataset.ensName = ensName;
+            console.log(`Stored address ${data.address} and ensName ${ensName} for coin dropdown.`);
+        } else {
+            delete coinDropdownContent.dataset.address;
+            delete coinDropdownContent.dataset.ensName;
+            console.log('No address found for profile, cleared coin dropdown data.');
+        }
+    } else {
+        console.warn('coin-dropdown-content not found when trying to set address data.');
+    }
     
     // Clear existing records
     if (profileRecords) profileRecords.innerHTML = '';
@@ -2069,43 +2108,42 @@ function normalizeUrl(url) {
 
 // Function to update the navigation bar based on the current view
 function updateNavBar(name, isRegistered) {
-    // Remove any existing follow button
-    const existingFollowButton = document.getElementById('follow-button');
-    if (existingFollowButton) {
-        existingFollowButton.remove();
-    }
-    
-    // Get the navbar and theme toggle button
     const navBar = document.querySelector('.nav-bar');
-    const themeToggle = document.getElementById('theme-toggle');
-    
-    // Create nav-buttons container if it doesn't exist
-    let navButtons = document.querySelector('.nav-buttons');
+    const themeToggle = document.getElementById('theme-toggle'); // Assuming theme toggle is always present
+    let navButtons = navBar.querySelector('.nav-buttons');
+
+    // Ensure navButtons container exists and is correctly placed
     if (!navButtons) {
         navButtons = document.createElement('div');
         navButtons.className = 'nav-buttons';
-        navBar.appendChild(navButtons);
+        const navLogo = navBar.querySelector('.nav-logo');
+        if (navLogo && navLogo.nextSibling) {
+            navBar.insertBefore(navButtons, navLogo.nextSibling);
+        } else {
+            navBar.appendChild(navButtons);
+        }
     }
-    
-    // If there's no theme toggle in the nav-buttons, move it there
-    if (themeToggle && themeToggle.parentElement !== navButtons) {
-        navButtons.appendChild(themeToggle);
-    }
-    
-    // Remove any existing dropdown
-    let existingDropdown = document.querySelector('.dropdown');
-    if (existingDropdown) {
-        existingDropdown.remove();
-    }
-    
-    // Only add dropdown for registered profiles (not homepage or unregistered names)
-    if (name !== 'home' && isRegistered) {
-        // Log the name for debugging
-        console.log('Profile name for links:', name);
 
-        // Determine if the profile is ENS or Basename
+    // Ensure theme toggle is the first child of navButtons, if themeToggle exists
+    if (themeToggle && navButtons.firstChild !== themeToggle) {
+        navButtons.prepend(themeToggle);
+    }
+
+    // Remove existing dynamic dropdown containers to prevent duplication
+    const existingSettingsBtnContainer = document.getElementById('settings-dropdown-btn-container');
+    if (existingSettingsBtnContainer) {
+        existingSettingsBtnContainer.remove();
+    }
+    const existingCoinBtnContainer = document.getElementById('coin-dropdown-btn-container');
+    if (existingCoinBtnContainer) {
+        existingCoinBtnContainer.remove();
+    }
+
+    if (name !== 'home' && isRegistered === true) {
+        console.log('Updating NavBar for registered profile:', name);
+
         const isBasename = name.endsWith('.base.eth');
-        const profileType = isBasename ? 'Basename' : 'ENS';
+        const profileTypeLabel = isBasename ? 'Basename' : 'ENS';
         const editRecordsLink = isBasename
             ? `https://www.base.org/name/${name.replace('.base.eth', '')}`
             : `https://app.ens.domains/${name}`;
@@ -2113,16 +2151,17 @@ function updateNavBar(name, isRegistered) {
             ? 'https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13'
             : `https://app.ens.domains/${name}`;
 
-        // Create dropdown with updated structure
-        const dropdown = document.createElement('div');
-        dropdown.className = 'dropdown';
-        dropdown.innerHTML = `
+        // Create and append Settings Dropdown
+        const settingsContainerDiv = document.createElement('div');
+        settingsContainerDiv.id = 'settings-dropdown-btn-container';
+        settingsContainerDiv.className = 'dropdown';
+        settingsContainerDiv.innerHTML = `
             <button id="settings-dropdown-btn" class="dropdown-btn">🏗️</button>
             <div id="settings-dropdown-content" class="dropdown-content">
                 <div class="dropdown-section">
                     <h4>EFP</h4>
                     <div class="dropdown-buttons">
-                        <a href="https://efp.app/" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
+                        <a href="https://efp.app/${name}" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
                     </div>
                 </div>
                 <div class="dropdown-section">
@@ -2158,31 +2197,37 @@ function updateNavBar(name, isRegistered) {
                     <h4>Website</h4>
                     <div class="dropdown-buttons">
                         <a href="#" class="dropdown-button download-website-button" id="nav-download-website">Download</a>
-                        <a href="https://hashvault.xyz" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy</a>
+                        <a href="https://pinata.cloud/" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy</a>
                         <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect</a>
                     </div>
                 </div>
                 <div class="dropdown-section">
-                    <h4>${profileType}</h4>
+                    <h4>${profileTypeLabel}</h4>
                     <div class="dropdown-buttons">
                         <a href="${editRecordsLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
                     </div>
                 </div>
             </div>
         `;
-        
-        // Add the dropdown to the nav buttons after the theme toggle
-        navButtons.appendChild(dropdown);
-        
-        // Update the EFP link with the correct profile name
-        const navEfpLink = document.getElementById('nav-efp-link');
-        if (navEfpLink) {
-            navEfpLink.href = `https://efp.app/${name}`;
-            console.log('Updated EFP link:', navEfpLink.href);
-        }
-        
-        // Initialize dropdown functionality
-        setupDropdown();
+        navButtons.appendChild(settingsContainerDiv);
+        setupDropdown('settings-dropdown-btn', 'settings-dropdown-content');
+
+        // Create and append Coin Dropdown
+        const coinContainerDiv = document.createElement('div');
+        coinContainerDiv.id = 'coin-dropdown-btn-container';
+        coinContainerDiv.className = 'dropdown';
+        coinContainerDiv.innerHTML = `
+            <button id="coin-dropdown-btn" class="dropdown-btn">🪙</button>
+            <div id="coin-dropdown-content" class="dropdown-content">
+                <h4>Send Crypto</h4>
+                <div id="coin-qr-code-container" style="margin:10px auto; width:150px; height:150px; display:none;"></div>
+                <div id="coin-wallet-address" style="word-wrap:break-word; text-align:center; margin:5px 0;">[Wallet Address]</div>
+                <button id="coin-copy-address-btn" class="dropdown-button">Copy Address</button>
+                <a id="coin-explorer-link-btn" class="dropdown-button" href="#" target="_blank" rel="noopener noreferrer" style="margin-top: 5px; display: none;">[Explorer Link]</a>
+            </div>
+        `;
+        navButtons.appendChild(coinContainerDiv);
+        setupDropdown('coin-dropdown-btn', 'coin-dropdown-content');
     }
 }
 
@@ -3205,177 +3250,169 @@ function debounce(func, wait) {
 }
 
 // Function to setup dropdown functionality
-function setupDropdown() {
-    const dropdownBtn = document.getElementById('settings-dropdown-btn');
-    const dropdownContent = document.getElementById('settings-dropdown-content');
-    
-    if (!dropdownBtn || !dropdownContent) return;
-    
-    // Reorder dropdown sections to ensure EFP is at the top and ENS/Basename is at the bottom
-    function reorderDropdownSections() {
-        const sections = dropdownContent.querySelectorAll('.dropdown-section');
-        if (sections.length >= 4) {
-            // Find the EFP section
-            let efpSection = null;
-            // Find the ENS/Basename section
-            let ensSection = null;
-            
-            for (let i = 0; i < sections.length; i++) {
-                const heading = sections[i].querySelector('h4');
-                if (heading) {
-                    if (heading.textContent.trim() === 'EFP') {
-                        efpSection = sections[i];
-                    } else if (heading.textContent.trim() === 'ENS/Basename') {
-                        ensSection = sections[i];
+function setupDropdown(btnId, contentId) {
+    const dropdownBtn = document.getElementById(btnId);
+    const content = document.getElementById(contentId);
+
+    if (!dropdownBtn || !content) {
+        // console.warn(`Dropdown elements not found for: ${btnId}, ${contentId}`); // Useful for debugging
+        return;
+    }
+
+    // Specific logic for settings dropdown
+    if (btnId === 'settings-dropdown-btn') {
+        function reorderDropdownSections() {
+            const sections = content.querySelectorAll('.dropdown-section');
+            if (sections.length >= 4) {
+                let efpSection = null;
+                let ensSection = null;
+                sections.forEach(section => {
+                    const heading = section.querySelector('h4');
+                    if (heading) {
+                        if (heading.textContent.trim() === 'EFP') efpSection = section;
+                        else if (heading.textContent.trim().startsWith('ENS') || heading.textContent.trim().startsWith('Basename')) ensSection = section;
                     }
-                }
+                });
+                if (efpSection && content.firstChild !== efpSection) content.insertBefore(efpSection, content.firstChild);
+                if (ensSection && content.lastChild !== ensSection) content.appendChild(ensSection);
             }
-            
-            // If found, move EFP to the top
-            if (efpSection && efpSection !== sections[0]) {
-                dropdownContent.insertBefore(efpSection, sections[0]);
-            }
-            
-            // If found, move ENS/Basename to the bottom
-            if (ensSection) {
-                dropdownContent.appendChild(ensSection);
-            }
+        }
+        reorderDropdownSections();
+
+        const navBgColor = content.querySelector('#nav-bg-color');
+        const navTextColor = content.querySelector('#nav-text-color');
+        const navBorderColor = content.querySelector('#nav-border-color');
+        const navEffectSelect = content.querySelector('#nav-effect-select');
+        const navDownloadWebsite = content.querySelector('#nav-download-website');
+
+        function syncColorPickers() {
+            const mainBgColor = document.getElementById('bg-color');
+            const mainTextColor = document.getElementById('text-color');
+            const mainBorderColor = document.getElementById('border-color');
+            const mainEffectSelect = document.getElementById('effect-select');
+            if (mainBgColor && navBgColor) navBgColor.value = mainBgColor.value;
+            if (mainTextColor && navTextColor) navTextColor.value = mainTextColor.value;
+            if (mainBorderColor && navBorderColor) navBorderColor.value = mainBorderColor.value;
+            if (mainEffectSelect && navEffectSelect) navEffectSelect.value = mainEffectSelect.value;
+        }
+
+        if (navBgColor) navBgColor.addEventListener('input', (e) => {
+            const mainBgColor = document.getElementById('bg-color');
+            if(mainBgColor) {mainBgColor.value = e.target.value; applyCustomStyles({ target: mainBgColor });}
+        });
+        if (navTextColor) navTextColor.addEventListener('input', (e) => {
+            const mainTextColor = document.getElementById('text-color');
+            if(mainTextColor) {mainTextColor.value = e.target.value; applyCustomStyles({ target: mainTextColor });}
+        });
+        if (navBorderColor) navBorderColor.addEventListener('input', (e) => {
+            const mainBorderColor = document.getElementById('border-color');
+            if(mainBorderColor) {mainBorderColor.value = e.target.value; applyCustomStyles({ target: mainBorderColor });}
+        });
+        if (navEffectSelect) navEffectSelect.addEventListener('change', () => {
+            const mainEffectSelect = document.getElementById('effect-select');
+            if(mainEffectSelect) {mainEffectSelect.value = navEffectSelect.value; handleEffectChange();}
+        });
+
+        if (navDownloadWebsite) navDownloadWebsite.addEventListener('click', (e) => { e.preventDefault(); generateDownload(); });
+
+        const profilePage = document.getElementById('profile-page');
+        if (profilePage) {
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'style' && profilePage.style.display === 'flex') {
+                        syncColorPickers();
+                    }
+                });
+            });
+            observer.observe(profilePage, { attributes: true });
         }
     }
     
-    // Call the reordering function
-    reorderDropdownSections();
-    
-    // Toggle dropdown when button is clicked
+    // Generic toggle logic for any dropdown button
     dropdownBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        dropdownContent.classList.toggle('show');
+        const isCurrentlyShown = content.classList.contains('show');
+        document.querySelectorAll('.dropdown-content.show').forEach(openDropdown => {
+            if (openDropdown.id !== contentId) {
+                openDropdown.classList.remove('show');
+            }
+        });
+        if (!isCurrentlyShown) {
+            content.classList.add('show');
+        } else {
+            content.classList.remove('show');
+        }
+
+        // Specific logic for coin dropdown when it's shown
+        if (btnId === 'coin-dropdown-btn' && content.classList.contains('show')) {
+            const address = content.dataset.address;
+            const ensNameForExplorer = content.dataset.ensName; // Renamed for clarity
+            const walletAddressDiv = document.getElementById('coin-wallet-address');
+            const qrCodeContainer = document.getElementById('coin-qr-code-container');
+            const explorerBtn = document.getElementById('coin-explorer-link-btn');
+
+            if (address && walletAddressDiv && qrCodeContainer && explorerBtn) {
+                walletAddressDiv.textContent = address;
+
+                if (ensNameForExplorer) {
+                    explorerBtn.style.display = 'flex'; /* Changed from 'block' to 'flex' for consistency */
+                    if (ensNameForExplorer.endsWith('.base.eth')) {
+                        explorerBtn.textContent = 'Basescan';
+                        explorerBtn.href = `https://basescan.org/name-lookup-search?id=${ensNameForExplorer}`;
+                    } else {
+                        explorerBtn.textContent = 'Etherscan';
+                        explorerBtn.href = `https://etherscan.io/name-lookup-search?id=${ensNameForExplorer}`;
+                    }
+                } else {
+                    explorerBtn.style.display = 'none';
+                }
+
+                if (qrCodeContainer && typeof QRCode !== 'undefined') { // Check for QRCode constructor
+                    qrCodeContainer.innerHTML = ''; // Clear previous QR code before generating a new one
+                    try {
+                        new QRCode(qrCodeContainer, {
+                            text: address,
+                            width: 150,
+                            height: 150,
+                            correctLevel: QRCode.CorrectLevel.M
+                        });
+                        qrCodeContainer.style.display = 'block'; // Show the container
+                    } catch (qrError) {
+                        console.warn('QR code generation failed:', qrError);
+                        qrCodeContainer.style.display = 'none'; // Hide if error
+                        // Optionally, add a user-visible error message in the container
+                        // qrCodeContainer.textContent = 'Error generating QR.';
+                    }
+                } else {
+                    if (!qrCodeContainer) console.warn('QR code container not found.');
+                    if (typeof QRCode === 'undefined') console.warn('QRCode library not loaded or QRCode constructor not found.');
+                    // Ensure container is hidden if it exists but library doesn't
+                    if(qrCodeContainer) qrCodeContainer.style.display = 'none';
+                }
+            } else {
+                if(walletAddressDiv) walletAddressDiv.textContent = 'Address not found.';
+                if(explorerBtn) explorerBtn.style.display = 'none';
+                if(qrCodeContainer) {
+                    qrCodeContainer.style.display = 'none';
+                    // qrCodeContainer.textContent = 'No address';
+                }
+            }
+        }
     });
-    
-    // Close dropdown when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
+}
+
+// Close dropdowns when clicking outside (global listener)
+document.addEventListener('click', (e) => {
+    const openDropdowns = document.querySelectorAll('.dropdown-content.show');
+    openDropdowns.forEach(dropdownContent => {
+        const btnId = dropdownContent.id.replace('-content', '-btn'); // Assumes button ID convention
+        const dropdownBtn = document.getElementById(btnId);
+
+        if (dropdownBtn && !dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
             dropdownContent.classList.remove('show');
         }
     });
-    
-    // Setup color pickers in dropdown
-    const navBgColor = document.getElementById('nav-bg-color');
-    const navTextColor = document.getElementById('nav-text-color');
-    const navBorderColor = document.getElementById('nav-border-color');
-    const navEffectSelect = document.getElementById('nav-effect-select');
-    
-    // Sync dropdown color pickers with main color pickers
-    function syncColorPickers() {
-        const bgColor = document.getElementById('bg-color');
-        const textColor = document.getElementById('text-color');
-        const borderColor = document.getElementById('border-color');
-        const effectSelect = document.getElementById('effect-select');
-        
-        if (bgColor && navBgColor) {
-            navBgColor.value = bgColor.value;
-        }
-        
-        if (textColor && navTextColor) {
-            navTextColor.value = textColor.value;
-        }
-        
-        if (borderColor && navBorderColor) {
-            navBorderColor.value = borderColor.value;
-        }
-        
-        if (effectSelect && navEffectSelect) {
-            navEffectSelect.value = effectSelect.value;
-        }
-    }
-    
-    // Update colors when dropdown color pickers change
-    if (navBgColor) {
-        navBgColor.addEventListener('input', (e) => {
-            const bgColor = document.getElementById('bg-color');
-            if (bgColor) {
-                bgColor.value = e.target.value;
-                applyCustomStyles({ target: bgColor });
-            }
-        });
-    }
-    
-    if (navTextColor) {
-        navTextColor.addEventListener('input', (e) => {
-            const textColor = document.getElementById('text-color');
-            if (textColor) {
-                textColor.value = e.target.value;
-                applyCustomStyles({ target: textColor });
-            }
-        });
-    }
-    
-    if (navBorderColor) {
-        navBorderColor.addEventListener('input', (e) => {
-            const borderColor = document.getElementById('border-color');
-            if (borderColor) {
-                borderColor.value = e.target.value;
-                applyCustomStyles({ target: borderColor });
-            }
-        });
-    }
-    
-    // Update effect when dropdown effect select changes
-    if (navEffectSelect) {
-        navEffectSelect.addEventListener('change', () => {
-            const effectSelect = document.getElementById('effect-select');
-            if (effectSelect) {
-                effectSelect.value = navEffectSelect.value;
-                handleEffectChange();
-            }
-        });
-    }
-    
-    // Setup website action buttons in dropdown
-    const navDownloadWebsite = document.getElementById('nav-download-website');
-    const navConnectWebsite = document.getElementById('nav-connect-website');
-    const navEditRecords = document.getElementById('nav-edit-records');
-    const navEfpLink = document.getElementById('nav-efp-link');
-    
-    if (navDownloadWebsite) {
-        navDownloadWebsite.addEventListener('click', (e) => {
-            e.preventDefault();
-            generateDownload();
-        });
-    }
-    
-    if (navConnectWebsite) {
-        // The href is now set directly in the HTML via updateNavBar
-        // No need to click another button
-    }
-    
-    // Setup Edit Records button - now has its own direct link
-    if (navEditRecords) {
-        // The href is now set directly in the HTML via updateNavBar
-        // No need to click another button
-    }
-    
-    // Setup EFP link - will be updated when profile is loaded
-    // The href is now set directly in the updateNavBar function
-    // No need to set a default value here as it will be overridden
-    
-    // Sync color pickers when profile page is shown
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-                const profilePage = document.getElementById('profile-page');
-                if (profilePage && profilePage.style.display === 'flex') {
-                    syncColorPickers();
-                }
-            }
-        });
-    });
-    
-    const profilePage = document.getElementById('profile-page');
-    if (profilePage) {
-        observer.observe(profilePage, { attributes: true });
-    }
-}
+});
 
 // Function to handle cycling words in the slogan
 function initializeCyclingWords() {
@@ -3439,15 +3476,40 @@ document.addEventListener('DOMContentLoaded', () => {
     // Set up navigation logo click handler
     setupNavLogoClickHandler();
     
-    // Setup dropdown functionality
-    setupDropdown();
-    
+    // Setup dropdown functionality for any static dropdowns if they existed,
+    // but settings and coin are dynamic. Copy button listener is delegated.
+    // The primary setup calls for dynamic dropdowns are within updateNavBar.
+
     // Initialize the GeoCities avatar and create PWA icons
-    initializeGeoCitiesAvatar().then(() => {
-        // Get the current avatar URL from the favicon
-        const avatarUrl = document.getElementById('favicon').href;
-        if (avatarUrl) {
-            createPWAIcons(avatarUrl);
+    // These should NOT call updateNavBar in a way that adds profile-specific buttons.
+    initializeGeoCitiesAvatar(); // Removed .then() as it's not strictly needed if it doesn't affect nav buttons
+
+    // Delegated event listener for "Copy Address" button
+    document.body.addEventListener('click', async (event) => {
+        if (event.target.id === 'coin-copy-address-btn') {
+            const walletAddressDiv = document.getElementById('coin-wallet-address');
+            const addressToCopy = walletAddressDiv ? walletAddressDiv.textContent : null;
+
+            if (addressToCopy && addressToCopy !== '[Wallet Address]' && addressToCopy !== 'Address not found.') {
+                try {
+                    await navigator.clipboard.writeText(addressToCopy);
+                    event.target.textContent = 'Copied!';
+                } catch (err) {
+                    console.error('Failed to copy address: ', err);
+                    event.target.textContent = 'Copy Failed';
+                }
+            } else {
+                event.target.textContent = 'Nothing to Copy';
+            }
+            setTimeout(() => {
+                // Check if the button still exists before trying to change its text
+                const button = document.getElementById('coin-copy-address-btn');
+                if (button) button.textContent = 'Copy Address';
+            }, 2000);
         }
     });
+
+    // Ensure the nav bar is in the correct initial state (no profile-specific buttons)
+    // This call is crucial to ensure homepage loads without profile buttons.
+    updateNavBar('home', false);
 });

@@ -1068,6 +1068,7 @@ h1#homepage-geocities {
     box-sizing: border-box;
     text-align: center;
     height: 32px;
+    line-height: 30px; /* Added for vertical centering */
 }
 
 /* Error message styles */

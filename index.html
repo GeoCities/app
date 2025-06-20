@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
-        script-src 'self' 'unsafe-inline' 'unsafe-eval';
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com;
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' https://fonts.gstatic.com;
         img-src 'self' data: https: http:;
@@ -31,60 +31,7 @@
         </a>
         <div class="nav-buttons">
             <button id="theme-toggle">Light</button>
-            <div class="dropdown">
-                <button id="settings-dropdown-btn" class="dropdown-btn">🏗️</button>
-                <div id="settings-dropdown-content" class="dropdown-content">
-                    <div class="dropdown-section">
-                        <h4>EFP</h4>
-                        <div class="dropdown-buttons">
-                            <a href="#" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
-                        </div>
-                    </div>
-                    <div class="dropdown-section">
-                        <h4>Design</h4>
-                        <div class="dropdown-controls-col">
-                            <label class="control-button bg-control">
-                                <input type="color" id="nav-bg-color" class="color-picker" title="Background">
-                                <span class="button-text">Background</span>
-                            </label>
-                            <label class="control-button text-control">
-                                <input type="color" id="nav-text-color" class="color-picker" title="Text">
-                                <span class="button-text">Text</span>
-                            </label>
-                            <label class="control-button border-control">
-                                <input type="color" id="nav-border-color" class="color-picker" title="Border">
-                                <span class="button-text">Border</span>
-                            </label>
-                            <div class="control-button effect-control">
-                                <select id="nav-effect-select" class="effect-select">
-                                    <option value="none">Effect</option>
-                                    <option value="glow">Glow</option>
-                                    <option value="snow">Snow</option>
-                                    <option value="stars">Stars</option>
-                                    <option value="rainbow">Rainbow</option>
-                                    <option value="matrix">Matrix</option>
-                                    <option value="neon">Neon</option>
-                                    <option value="vaporware">Vaporware</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="dropdown-section">
-                        <h4>Website</h4>
-                        <div class="dropdown-buttons">
-                            <a href="#" class="dropdown-button" id="nav-download-website">Download</a>
-                            <a href="https://hashvault.xyz" target="_blank" rel="noopener noreferrer" class="dropdown-button">Deploy</a>
-                            <a class="dropdown-button" id="nav-connect-website">Connect</a>
-                        </div>
-                    </div>
-                    <div class="dropdown-section">
-                        <h4>ENS/Basename</h4>
-                        <div class="dropdown-buttons">
-                            <a class="dropdown-button" id="nav-edit-records">Edit Records</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Settings and Coin dropdowns will be dynamically added here by script.js -->
         </div>
     </nav>
     <div class="container">
@@ -143,6 +90,7 @@
     </footer>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
