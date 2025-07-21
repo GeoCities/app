@@ -1015,15 +1015,11 @@ async function generateDownload() {
             currentEffect: effectSelect ? effectSelect.value : 'none'
         };
 
-        // Fetch the download-template.html file
-        const response = await fetch('download-template.html');
-        if (!response.ok) {
-            // If we can't fetch the template, use a fallback approach
-            throw new Error('Could not load template file - using fallback');
+        const templateResponse = await fetch('download-template.html');
+        if (!templateResponse.ok) {
+            throw new Error('Could not load template file');
         }
-        
-        // Get the template content
-        let templateHtml = await response.text();
+        let templateHtml = await templateResponse.text();
         
         // Replace placeholders in the template
         templateHtml = templateHtml.replace(/ENS_NAME_TITLE_PLACEHOLDER/g, ensName); // Used for page title and raw-profile-name span
@@ -1136,16 +1132,6 @@ async function generateDownload() {
     } catch (error) {
         console.error('Error generating download:', error);
         
-        // If we couldn't fetch the template, try an alternative approach
-        if (error.message.includes('using fallback')) {
-            try {
-                await downloadUsingXHR();
-                return;
-            } catch (xhrError) {
-                console.error('XHR fallback failed:', xhrError);
-            }
-        }
-        
         const errorToast = document.createElement('div');
         errorToast.textContent = 'Error downloading website: ' + error.message;
         errorToast.style.cssText = `
@@ -1166,116 +1152,6 @@ async function generateDownload() {
             setTimeout(() => document.body.removeChild(errorToast), 500);
         }, 3000);
     }
-}
-
-// Alternative download method using XMLHttpRequest
-async function downloadUsingXHR() {
-    return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('GET', 'download-template.html', true);
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === 4) {
-                if (xhr.status === 200) {
-                    try {
-                        // Get current profile data
-                        const profileNameElement = document.querySelector('.profile-record .record-value');
-                        if (!profileNameElement) {
-                            reject(new Error('No profile data found to download'));
-                            return;
-                        }
-                        
-                        const ensName = profileNameElement.textContent;
-                        const avatarUrl = document.getElementById('nav-logo-img').src;
-                        
-                        // Get current styling
-                        const currentStyles = {
-                            backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--background-color').trim(),
-                            textColor: getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim(),
-                            borderColor: getComputedStyle(document.documentElement).getPropertyValue('--border-color').trim(),
-                            currentEffect: effectSelect ? effectSelect.value : 'none'
-                        };
-                        
-                        let templateHtml = xhr.responseText;
-                        
-                        // Replace placeholders
-                        templateHtml = templateHtml.replace(/ENS_NAME_TITLE_PLACEHOLDER/g, ensName);
-                        templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
-                        templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
-                        
-                        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
-                        let profileAddress = '[Address not found]';
-                        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
-                            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
-                        } else {
-                             console.warn("downloadUsingXHR: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
-                        }
-                        // The template will fetch its own address. Set a placeholder.
-                        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
-                        // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template.
-
-                        // Add CSS variables for colors
-                        const cssVariables = `
-                            --primary-color: ${currentStyles.textColor};
-                            --background-color: ${currentStyles.backgroundColor};
-                            --border-color: ${currentStyles.borderColor};
-                        `;
-                        templateHtml = templateHtml.replace(/\/\* Default variables that will be replaced by THEME_CSS_VARIABLES_PLACEHOLDER \*\/[^\}]+\}/s, 
-                            `/* Default variables that will be replaced by THEME_CSS_VARIABLES_PLACEHOLDER */
-                            ${cssVariables}
-                        }`);
-                        
-                        // Add effect styles if selected
-                        if (currentStyles.currentEffect !== 'none') {
-                            const effectStyles = generateEffectStyles(currentStyles.currentEffect);
-                            templateHtml = templateHtml.replace(/\/\* EFFECT_STYLES_PLACEHOLDER \*\//g, effectStyles);
-                            
-                            // Add effect initialization code
-                            const effectInitCode = generateEffectInitCode(currentStyles.currentEffect);
-                            if (effectInitCode) {
-                                // Find the script section at the end of the file
-                                const scriptIndex = templateHtml.lastIndexOf('<script>');
-                                if (scriptIndex !== -1) {
-                                    const scriptEndIndex = templateHtml.indexOf('</script>', scriptIndex);
-                                    if (scriptEndIndex !== -1) {
-                                        // Insert the effect initialization code before the script end tag
-                                        templateHtml = templateHtml.substring(0, scriptEndIndex) + 
-                                            '\n' + effectInitCode + '\n' + 
-                                            templateHtml.substring(scriptEndIndex);
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Create download link
-                        const downloadLink = document.createElement('a');
-                        downloadLink.setAttribute('href', 'data:text/html;charset=utf-8,' + encodeURIComponent(templateHtml));
-                        
-                        // Format the filename as <ens or basename>.eth.html
-                        let filename = ensName.toLowerCase();
-                        // If it doesn't already end with .eth, add it
-                        if (!filename.endsWith('.eth')) {
-                            filename = `${filename}.eth`;
-                        }
-                        // Add .html extension
-                        filename = `${filename}.html`;
-                        downloadLink.setAttribute('download', filename);
-                        
-                        // Trigger download
-                        document.body.appendChild(downloadLink);
-                        downloadLink.click();
-                        document.body.removeChild(downloadLink);
-                        
-                        resolve();
-                    } catch (error) {
-                        reject(error);
-                    }
-                } else {
-                    reject(new Error(`Failed to load template: ${xhr.status}`));
-                }
-            }
-        };
-        xhr.send();
-    });
 }
 
 // Helper function to generate effect styles
