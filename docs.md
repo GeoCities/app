@@ -55,20 +55,19 @@ If a searched name is unregistered:
 ![Register button ENS](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1350.png)
 
 2. ENS/Basename
- - **ENS**: Redirects to the [ENS Manager](https://app.ens.domains) ([ENS Documentation](https://docs.ens.domains)).
-![ENS register](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1349.png)
-  - **Basename**: Redirects to the [Basename Website](https://www.base.org/names) ([Basename Documentation](https://docs.base.org)).
+ - **ENS**: Redirects to the [ENS Manager](https://app.ens.domains), see [ENS Documentation] (https://docs.ens.domains) for more details. ![ENS register](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1349.png)
+  - **Basename**: Redirects to the [Basename Website] (https://www.base.org/names), see [Basename Documentation] (https://docs.base.org) for more details.
 ![Basename Register](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1351.png)
-3. Follow the respective platform’s instructions to register the name, including costs (refer to linked documentation).
+3. Follow the respective platform’s instructions, or detailed documentation linked above, to register a new name.
 
 ### ENS/Basename Profiles
 
-Registered ENS/Basename profiles are automatically generated from “records” including:
+ENS and Basename profiles are automatically generated from “records” including:
 
-- **Avatar**: Profile image set in ENS records.
-- **Header**: Banner image or text.
-- **Links**: Social media or website links, similar to Linktree.
-- **Ethereum Follow Protocol (EFP)**: Enables a decentralized social graph, showing followers and following for ENS/Basenames.
+- **Avatar**: Profile image.
+- **Header**: Banner image.
+- **Links**: Social media or website links.
+- **Ethereum Follow Protocol (EFP)**: A opensource decentralized social graph, for followers and following data integrated into ENS and Basenames.
 
 ![GeoCities.eth](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1359.png)
 ![GeoCities.base.eth](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1360.png)
@@ -87,63 +86,64 @@ To edit a profile:
 
 ### 🏗️ 
 
-The 🏗️ menu provides tools for designing and deploying websites.
+The GeoCities 🏗️ button opens a dropdown menu with tools for designing and deploying GeoCities decentralized websites.
 
 ![🏗️ open](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1363.png)
 
 #### EFP (Ethereum Follow Protocol)
 
-- **Follow**: links to [EFP](https://docs.efp.app/intro/)
+- **Follow Button**: links to [EFP](https://docs.efp.app/intro/)
 - ![EFP](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1362.png)
 
 #### Design
 
 Customize your profile or website:
 
-- **Background**: Choose colors or images.
+- **Background Button**: Choose custom background colors.
 ![Background Color](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1364.png)
-- **Text**: Modify fonts and colors.
+- **Text Button**: Modify fonts colors.
 ![Text Color](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1365.png)
 png)
-- **Border**: Adjust border styles.
+- **Border Button**: Adjust border styles.
 ![Border Color](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1366.png)
 - **Effects**: Add animations or visual effects.
 ![Effects Menu](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1367.png)
 
 #### Website
 
-Create and deploy a decentralized website:
+Download and deploy a GeoCities decentralized website:
 
-1. **Download**:
-   - Click **Download** to generate an HTML/JS file for your ENS or Basename website, styled like a classic GeoCities page.
-   - Save the file locally for editing or hosting.
+1. **Download Button**:
+   - Click **Download** to generate and download a HTML file with your GeoCities website for your ENS or Basename.
+   - Save the file locally.
 ![Download](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1368.png)
-2. **Deploy**:
+2. **Deploy Button**:
    - Click **Deploy** to upload your website to IPFS.
-   - Current option: [Pinata](https://www.pinata.cloud) ([Pinata Documentation](https://docs.pinata.cloud)).
+   - Current link: [Pinata](https://www.pinata.cloud) ([Pinata Documentation](https://docs.pinata.cloud)).
 ![Pinata](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1355.png)
-   - Other services:
+   - Other decentralized storage services:
      - [Hash Vault](https://hashvault.xyz) ([Hash Vault Documentation](https://hashvault.xyz)).
 ![HashVault](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1354.png)
      - [Fleek](https://fleek.co) ([Fleek Documentation](https://docs.fleek.co)).
    - GeoCities IPFS deployment: Coming soon.
 
-3. **Connect**:
-Link your website to your ENS/Basename:
+3. **Connect Button**:
+Link your website to your ENS or Basename:
 
 - **ENS**: Links to [ENS Manager](https://app.ens.domains)
   - [ENS Documentation for Adding Content Hash](https://docs.ens.domains/v3/user-guides/add-content-hash)
 ![ENS Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1369.png)
 
-- **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13) (not currently available on Basename website). Connect your wallet and past the Basename Node for your name & Contenthash, see detailed instructions below to get your Basename Node and Contenthash
+- **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13) (UI not currently available on Basename website). Connect your wallet and paste the Basename Node for your name & Contenthash, see detailed instructions below to get your Basename Node and GeoCities decentralized website Contenthash.
+![Basename Smart Contract Contenthash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1371.png)
   - **Basename Node**: Decode your Basename in Basescan to obtain the "node" for the Basename.
     - Search your Basename on Basescan.
     - Click the "transaction hash" under "related transaction" for the "register" action of the Basename.
     - Click the "logs" tab.
     - Scroll down to "Basename: Basenames: L2 Resolver" and copy the "node" where the Basename is displayed in the "data" box, click the dropdown button next to the "1:node" box and select "hex", then copy the node that begins with "0x".
-  - **Basename ContentHash**: After deploying your GeoCities website file to IPFS you will get a CID which must be converted to a hash or Contenthash.
-    - **[CID Tool](https://adraffy.github.io/cid.js/test/demo.html)**: Use this tool to obtain the hash or content hash using your CID.
-![Basename Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1371.png)
+  - **ContentHash for Basename Smart Contract**: After deploying your GeoCities website file to IPFS you will get a "CID" which must be converted to a  Contenthash.
+    - **[CID Tool](https://adraffy.github.io/cid.js/test/demo.html)**: Use this tool to obtain the contenthash using your CID.
+
 
 ### 🪙
 GeoCities crypto wallet coming soon.
