@@ -136,7 +136,11 @@ Link your website to your ENS/Basename:
 ![ENS Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1369.png)
 
 - **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13) (not currently available on Basename website).
-  - **Basename Node**: Decode your Basename in Basescan to obtain the "node" (starts with 0x) for the name.
+  - **Basename Node**: Decode your Basename in Basescan to obtain the "node" for the Basename.
+    - Search your Basename on Basescan.
+    - Click the "transaction hash" of the 1st "related transaction" of the Basename.
+    - Click the "logs" tab.
+    - Scroll down the logs to "Basename: Registry" and copy the "node" that begins with "0x".
   - **Basename ContentHash**: After deploying your GeoCities website file to IPFS you will get a CID which must be converted to a hash or content hash.
     - **[CID Tool](https://adraffy.github.io/cid.js/test/demo.html)**: Use this tool to obtain the hash or content hash using your CID.
 ![Basename Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1371.png)
