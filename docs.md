@@ -120,11 +120,11 @@ Create and deploy a decentralized website:
 ![Download](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1368.png)
 2. **Deploy**:
    - Click **Deploy** to upload your website to IPFS.
-   - Current option: [Hash Vault](https://hashvault.xyz) ([Hash Vault Documentation](https://hashvault.xyz)).
-![HashVault](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1354.png)
-   - Other services:
-     - [Pinata](https://www.pinata.cloud) ([Pinata Documentation](https://docs.pinata.cloud)).
+   - Current option: [Pinata](https://www.pinata.cloud) ([Pinata Documentation](https://docs.pinata.cloud)).
 ![Pinata](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1355.png)
+   - Other services:
+     - [Hash Vault](https://hashvault.xyz) ([Hash Vault Documentation](https://hashvault.xyz)).
+![HashVault](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1354.png)
      - [Fleek](https://fleek.co) ([Fleek Documentation](https://docs.fleek.co)).
    - GeoCities IPFS deployment: Coming soon.
 
@@ -134,6 +134,7 @@ Link your website to your ENS/Basename:
 - **ENS**: Links to [ENS Manager](https://app.ens.domains)
   - [ENS Documentation for Adding Content Hash](https://docs.ens.domains/v3/user-guides/add-content-hash)
 ![ENS Content Hash](https://raw.githubusercontent.com/GeoCities/app/refs/heads/main/assets/screenshots/IMG_1369.png)
+
 - **Basename**: Links to the Basename smart contract on [Basescan](https://basescan.org/address/0xc6d566a56a1aff6508b41f6c90ff131615583bcd#writeContract#F13) (not currently available on Basename website).
   - **Basename Node**: Decode your Basename in Basescan to obtain the "node" (starts with 0x) for the name.
   - **Basename ContentHash**: After deploying your GeoCities website file to IPFS you will get a CID which must be converted to a hash or content hash.
