@@ -148,7 +148,15 @@ async function initializeGeoCitiesAvatar() {
     try {
         setAvatar(DEFAULT_AVATAR);
         
-        const response = await fetch(`${API_BASE_URL}/profile/ens/geocities.eth`);
+        // Fetch the profile data with a timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+        const response = await fetch(`${API_BASE_URL}/profile/ens/geocities.eth`, {
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
         if (response.ok) {
             const data = await response.json();
             if (data.avatar) {
@@ -2861,22 +2869,10 @@ async function createPWAIcons(avatarUrl) {
     }
 }
 
-// Track if the grid has been initialized
-let gridInitialized = false;
-
 // Function to initialize and populate the ENS grid
 async function initializeENSGrid() {
     const ensGrid = document.getElementById('ens-grid');
     if (!ensGrid) return;
-    
-    // If the grid is already being initialized or has been initialized, return
-    if (gridInitialized) {
-        console.log('Grid already initialized, skipping duplicate initialization');
-        return;
-    }
-    
-    // Mark that we're starting initialization
-    gridInitialized = true;
     
     // Clear any existing content
     ensGrid.innerHTML = '';
@@ -2959,8 +2955,6 @@ async function initializeENSGrid() {
             // Only reinitialize if the column count has changed
             const newColumnsPerRow = getColumnsPerRow();
             if (newColumnsPerRow !== columnsPerRow) {
-                // Reset the initialization flag to allow recreating the grid on resize
-                gridInitialized = false;
                 initializeENSGrid();
             }
         }, 250));
@@ -2968,8 +2962,6 @@ async function initializeENSGrid() {
         console.log('ENS Grid initialized successfully');
     } catch (error) {
         console.error('Error initializing ENS grid:', error);
-        // Reset the flag if initialization fails
-        gridInitialized = false;
     }
 }
 
@@ -3088,7 +3080,7 @@ async function fetchENSAvatar(ensName, imgElement) {
         
         // Fetch the profile data with a timeout
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000); // Reduced to 3 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased to 10 second timeout
         
         const response = await fetch(url, { 
             signal: controller.signal,
@@ -3466,9 +3458,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize the ENS grid
     initializeENSGrid();
-    
-    // Set up lazy loading for avatars
-    setupLazyLoading();
     
     // Initialize color pickers
     initializeColorPickers();
