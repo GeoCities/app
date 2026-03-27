@@ -1922,20 +1922,12 @@ function displayProfile(data, ensName) {
     // 3. Followers/Following from ethfollow.xyz API
     console.log('Display profile data:', JSON.stringify(data.ethFollow));
     
-    if (data.ethFollow && (data.ethFollow.followers !== '0' || data.ethFollow.following !== '0')) {
-        // Use ethfollow.xyz data if available and not zero
+    if (data.ethFollow) {
         console.log('Using ethfollow data:', data.ethFollow.followers, data.ethFollow.following);
         addProfileRecord('Followers', data.ethFollow.followers);
         addProfileRecord('Following', data.ethFollow.following);
-    } else if (data.social) {
-        // Fallback to original social data if ethfollow data is not available
-        const followers = data.social.follower !== undefined ? data.social.follower : 0;
-        const following = data.social.following !== undefined ? data.social.following : 0;
-        console.log('Using social data:', followers, following);
-        addProfileRecord('Followers', followers);
-        addProfileRecord('Following', following);
     } else {
-        console.log('No follower data available, using zeros');
+        console.log('No ethfollow data available, using zeros');
         addProfileRecord('Followers', 0);
         addProfileRecord('Following', 0);
     }
