@@ -52,6 +52,175 @@ const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 let gridResizeHandler = null;
 let gridObserver = null;
 
+// ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
+
+function _keccak256(data) {
+    const RATE = 136;
+    const RCL = new Int32Array([
+        0x00000001, 0x00008082, 0x0000808a, 0x80008000,
+        0x0000808b, 0x80000001, 0x80008081, 0x00008009,
+        0x0000008a, 0x00000088, 0x80008009, 0x8000000a,
+        0x8000808b, 0x0000008b, 0x00008089, 0x00008003,
+        0x00008002, 0x00000080, 0x0000800a, 0x8000000a,
+        0x80008081, 0x00008080, 0x80000001, 0x80008008
+    ]);
+    const RCH = new Int32Array([
+        0, 0, 0x80000000, 0x80000000,
+        0, 0, 0x80000000, 0x80000000,
+        0, 0, 0, 0,
+        0, 0x80000000, 0x80000000, 0x80000000,
+        0x80000000, 0x80000000, 0, 0x80000000,
+        0x80000000, 0x80000000, 0, 0x80000000
+    ]);
+    const ROT = [0,1,62,28,27,36,44,6,55,20,3,10,43,25,39,41,45,15,21,8,18,2,61,56,14];
+    const sl = new Int32Array(25), sh = new Int32Array(25);
+
+    function rot(lo, hi, n) {
+        if (n === 0) return [lo, hi];
+        if (n < 32) return [(lo << n) | (hi >>> (32 - n)), (hi << n) | (lo >>> (32 - n))];
+        if (n === 32) return [hi, lo];
+        n -= 32;
+        return [(hi << n) | (lo >>> (32 - n)), (lo << n) | (hi >>> (32 - n))];
+    }
+
+    function f() {
+        const cl = new Int32Array(5), ch = new Int32Array(5);
+        const bl = new Int32Array(25), bh = new Int32Array(25);
+        for (let r = 0; r < 24; r++) {
+            for (let x = 0; x < 5; x++) {
+                cl[x] = sl[x] ^ sl[x+5] ^ sl[x+10] ^ sl[x+15] ^ sl[x+20];
+                ch[x] = sh[x] ^ sh[x+5] ^ sh[x+10] ^ sh[x+15] ^ sh[x+20];
+            }
+            for (let x = 0; x < 5; x++) {
+                const [rl, rh] = rot(cl[(x+1)%5], ch[(x+1)%5], 1);
+                const dl = cl[(x+4)%5] ^ rl, dh = ch[(x+4)%5] ^ rh;
+                for (let y = 0; y < 5; y++) { sl[x+5*y] ^= dl; sh[x+5*y] ^= dh; }
+            }
+            for (let x = 0; x < 5; x++) {
+                for (let y = 0; y < 5; y++) {
+                    const [rl, rh] = rot(sl[x+5*y], sh[x+5*y], ROT[x+5*y]);
+                    const t = y + 5*((2*x+3*y)%5);
+                    bl[t] = rl; bh[t] = rh;
+                }
+            }
+            for (let x = 0; x < 5; x++) {
+                for (let y = 0; y < 5; y++) {
+                    const i = x+5*y;
+                    sl[i] = bl[i] ^ (~bl[(x+1)%5+5*y] & bl[(x+2)%5+5*y]);
+                    sh[i] = bh[i] ^ (~bh[(x+1)%5+5*y] & bh[(x+2)%5+5*y]);
+                }
+            }
+            sl[0] ^= RCL[r]; sh[0] ^= RCH[r];
+        }
+    }
+
+    const pad = RATE - (data.length % RATE);
+    const msg = new Uint8Array(data.length + pad);
+    msg.set(data);
+    msg[data.length] = 0x01;
+    msg[msg.length - 1] |= 0x80;
+
+    for (let off = 0; off < msg.length; off += RATE) {
+        for (let i = 0; i < 17; i++) {
+            const b = off + i * 8;
+            sl[i] ^= msg[b] | (msg[b+1] << 8) | (msg[b+2] << 16) | (msg[b+3] << 24);
+            sh[i] ^= msg[b+4] | (msg[b+5] << 8) | (msg[b+6] << 16) | (msg[b+7] << 24);
+        }
+        f();
+    }
+
+    const out = new Uint8Array(32);
+    for (let i = 0; i < 4; i++) {
+        const lo = sl[i] >>> 0, hi = sh[i] >>> 0;
+        for (let b = 0; b < 4; b++) out[i*8+b] = (lo >>> (b*8)) & 0xff;
+        for (let b = 0; b < 4; b++) out[i*8+4+b] = (hi >>> (b*8)) & 0xff;
+    }
+    return out;
+}
+
+function _ensNamehash(name) {
+    let node = new Uint8Array(32);
+    if (!name) return node;
+    const labels = name.toLowerCase().split('.');
+    for (let i = labels.length - 1; i >= 0; i--) {
+        const labelHash = _keccak256(new TextEncoder().encode(labels[i]));
+        const combined = new Uint8Array(64);
+        combined.set(node);
+        combined.set(labelHash, 32);
+        node = _keccak256(combined);
+    }
+    return node;
+}
+
+function _toHex(bytes) {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function _encodeTextCall(namehashHex, key) {
+    const keyBytes = new TextEncoder().encode(key);
+    const keyPad = Math.ceil(keyBytes.length / 32) * 32;
+    const out = new Uint8Array(4 + 32 + 32 + 32 + keyPad);
+    out[0] = 0x59; out[1] = 0xd1; out[2] = 0xd4; out[3] = 0x3c;
+    for (let i = 0; i < 32; i++) out[4 + i] = parseInt(namehashHex.slice(i*2, i*2+2), 16);
+    out[4 + 32 + 31] = 64;
+    const kl = keyBytes.length;
+    out[4 + 64 + 29] = (kl >> 16) & 0xff;
+    out[4 + 64 + 30] = (kl >> 8) & 0xff;
+    out[4 + 64 + 31] = kl & 0xff;
+    out.set(keyBytes, 4 + 96);
+    return '0x' + _toHex(out);
+}
+
+async function _ethCall(to, data) {
+    const r = await fetch('https://cloudflare-eth.com', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to, data }, 'latest'], id: 1 })
+    });
+    const j = await r.json();
+    return j.result || null;
+}
+
+function _decodeAbiString(hex) {
+    if (!hex || hex === '0x') return '';
+    const d = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (d.length < 128) return '';
+    const len = parseInt(d.slice(64, 128), 16);
+    if (!len || len > 10000 || d.length < 128 + len * 2) return '';
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = parseInt(d.slice(128 + i*2, 130 + i*2), 16);
+    return new TextDecoder().decode(bytes);
+}
+
+async function fetchENSNumericTextRecords(ensName) {
+    try {
+        const nhBytes = _ensNamehash(ensName);
+        const nhHex = _toHex(nhBytes);
+        const resolverResult = await _ethCall(
+            '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e',
+            '0x0178b8bf' + nhHex
+        );
+        if (!resolverResult || resolverResult.length < 42) return {};
+        const resolver = '0x' + resolverResult.slice(-40);
+        if (/^0x0+$/.test(resolver)) return {};
+        const calls = Array.from({ length: 20 }, (_, i) => {
+            const key = String(i);
+            return _ethCall(resolver, _encodeTextCall(nhHex, key))
+                .then(r => ({ key, value: _decodeAbiString(r) }))
+                .catch(() => ({ key, value: '' }));
+        });
+        const results = await Promise.all(calls);
+        const records = {};
+        for (const { key, value } of results) {
+            if (value) records[key] = value;
+        }
+        return records;
+    } catch (e) {
+        console.warn('ENS on-chain fetch failed:', e);
+        return {};
+    }
+}
+
 // Get DOM elements
 const bgColorPicker = document.getElementById('bg-color');
 const textColorPicker = document.getElementById('text-color');
@@ -1769,6 +1938,9 @@ async function fetchProfile(query) {
         const ethFollowUrl = `https://api.ethfollow.xyz/api/v1/users/${ensName}/stats`;
         
         try {
+            // Start on-chain ENS numeric records fetch in parallel with web3.bio
+            const ensRecordsPromise = fetchENSNumericTextRecords(ensName);
+
             // Fetch profile data from web3.bio
             const profileResponse = await fetch(url);
             
@@ -1796,17 +1968,26 @@ async function fetchProfile(query) {
                 // Log the ethfollow data for debugging
                 console.log('Raw ethfollow data:', JSON.stringify(ethFollowData));
                 
+                const ensNumericRecords = await ensRecordsPromise;
+                let mergedRecords;
+                if (profileData.records && profileData.records.texts) {
+                    mergedRecords = { ...profileData.records, texts: Object.assign({}, profileData.records.texts, ensNumericRecords) };
+                } else {
+                    mergedRecords = Object.assign({}, profileData.records || {}, ensNumericRecords);
+                }
+
                 const mergedData = {
                     ...profileData,
+                    records: mergedRecords,
                     ethFollow: {
                         followers: ethFollowData.followers_count || '0',
                         following: ethFollowData.following_count || '0'
                     }
                 };
-                
+
                 // Log the merged data for debugging
                 console.log('Merged data ethFollow:', JSON.stringify(mergedData.ethFollow));
-                
+
                 displayProfile(mergedData, ensName);
             } else if (profileResponse.status === 404) {
                 displayUnregisteredProfile(ensName);
