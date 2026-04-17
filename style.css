@@ -1085,6 +1085,7 @@ h1#homepage-geocities {
 
 /* Number Records Container */
 .profile-number-records {
+    display: none;
     width: 100%;
     border: 1px solid var(--border-color);
     box-sizing: border-box;
