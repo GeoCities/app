@@ -48,6 +48,10 @@ const OTHER_ENS_NAMES = [
 // Combined array for backward compatibility
 const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 
+// Grid cleanup tracking — prevents listener/observer accumulation on re-init
+let gridResizeHandler = null;
+let gridObserver = null;
+
 // Get DOM elements
 const bgColorPicker = document.getElementById('bg-color');
 const textColorPicker = document.getElementById('text-color');
@@ -2422,10 +2426,7 @@ function addNumberRecord(label, value) {
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize GeoCities avatar
     initializeGeoCitiesAvatar();
-    
-    // Initialize the ENS grid
-    initializeENSGrid();
-    
+
     // Initialize the homepage nav bar with Follow button
     updateNavBar('home', true);
     
@@ -2865,7 +2866,19 @@ async function createPWAIcons(avatarUrl) {
 async function initializeENSGrid() {
     const ensGrid = document.getElementById('ens-grid');
     if (!ensGrid) return;
-    
+
+    // Remove any previously registered resize handler to avoid accumulation
+    if (gridResizeHandler) {
+        window.removeEventListener('resize', gridResizeHandler);
+        gridResizeHandler = null;
+    }
+
+    // Disconnect any existing IntersectionObserver before clearing the grid
+    if (gridObserver) {
+        gridObserver.disconnect();
+        gridObserver = null;
+    }
+
     // Clear any existing content
     ensGrid.innerHTML = '';
     
@@ -2943,13 +2956,13 @@ async function initializeENSGrid() {
         setupLazyLoading();
         
         // Add window resize listener to update the grid when screen size changes
-        window.addEventListener('resize', debounce(() => {
-            // Only reinitialize if the column count has changed
+        gridResizeHandler = debounce(() => {
             const newColumnsPerRow = getColumnsPerRow();
             if (newColumnsPerRow !== columnsPerRow) {
                 initializeENSGrid();
             }
-        }, 250));
+        }, 250);
+        window.addEventListener('resize', gridResizeHandler);
         
         console.log('ENS Grid initialized successfully');
     } catch (error) {
@@ -3151,31 +3164,27 @@ function setupLazyLoading() {
     }
     
     // Create a new Intersection Observer with higher priority for visible elements
-    const observer = new IntersectionObserver((entries, observer) => {
+    gridObserver = new IntersectionObserver((entries, obs) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const img = entry.target;
                 const ensName = img.dataset.ensName;
                 if (ensName) {
-                    // Fetch the avatar when the image comes into view
                     fetchENSAvatar(ensName, img);
-                    
-                    // Stop observing this image once we've started loading it
-                    observer.unobserve(img);
+                    obs.unobserve(img);
                 }
             }
         });
     }, {
-        rootMargin: '200px', // Increased to 200px to load earlier
-        threshold: 0.01 // Trigger when even a tiny part is visible
+        rootMargin: '200px',
+        threshold: 0.01
     });
-    
+
     // Find all avatar images and observe them (except the preloaded ones)
     const avatarImages = document.querySelectorAll('.ens-avatar img[data-ens-name]');
     avatarImages.forEach((img, index) => {
-        // Skip the first few that were preloaded
         if (index >= 5) {
-            observer.observe(img);
+            gridObserver.observe(img);
         }
     });
 }
