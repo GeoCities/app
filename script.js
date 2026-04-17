@@ -48,7 +48,16 @@ const OTHER_ENS_NAMES = [
 // Combined array for backward compatibility
 const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 
-// Grid cleanup tracking — prevents listener/observer accumulation on re-init
+// EIP-6963 multi-wallet discovery — collected at startup
+const _eip6963Providers = [];
+window.addEventListener('eip6963:announceProvider', (event) => {
+    if (!_eip6963Providers.find(p => p.info.uuid === event.detail.info.uuid)) {
+        _eip6963Providers.push(event.detail);
+    }
+});
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+
 let gridResizeHandler = null;
 let gridObserver = null;
 
@@ -2462,64 +2471,108 @@ function updateWalletUI() {
     }
 }
 
-// Open the Rainbow-style wallet selection modal
+// Open the wallet selection modal — uses EIP-6963, legacy injection, or mobile deep links
 function openWalletModal() {
     const modal = document.getElementById('wallet-modal');
     const list = document.getElementById('wallet-modal-list');
     if (!modal || !list) return;
 
-    // Detect available wallets
-    const providers = window.ethereum?.providers || (window.ethereum ? [window.ethereum] : []);
-    const walletDefs = [
-        { name: 'MetaMask',       icon: '🦊', test: p => p.isMetaMask && !p.isCoinbaseWallet, url: 'https://metamask.io/download/' },
-        { name: 'Coinbase Wallet',icon: '🔵', test: p => p.isCoinbaseWallet,                  url: 'https://www.coinbase.com/wallet/downloads' },
-        { name: 'Rainbow',        icon: '🌈', test: p => p.isRainbow,                          url: 'https://rainbow.me/download' },
-        { name: 'Brave Wallet',   icon: '🦁', test: p => p.isBraveWallet,                     url: 'https://brave.com/wallet/' },
+    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const dappUrl = window.location.href;
+    const dappHost = window.location.hostname + window.location.pathname;
+
+    // Mobile deep links — open dapp inside the wallet's in-app browser
+    const mobileLinks = {
+        'io.metamask':         `https://metamask.app.link/dapp/${dappHost}`,
+        'app.rainbow':         `https://rnbwapp.com/dapp?url=${encodeURIComponent(dappUrl)}`,
+        'xyz.coinbase.wallet': `https://go.cb-wallet.com/dapp?url=${encodeURIComponent(dappUrl)}`,
+        'com.trustwallet.app': `https://link.trustwallet.com/open_url?url=${encodeURIComponent(dappUrl)}`,
+    };
+
+    // Known wallet info for fallback detection / display
+    const knownWallets = [
+        { rdns: 'io.metamask',         name: 'MetaMask',       icon: '🦊', test: p => p.isMetaMask && !p.isCoinbaseWallet, installUrl: 'https://metamask.io/download/' },
+        { rdns: 'xyz.coinbase.wallet', name: 'Coinbase Wallet',icon: '🔵', test: p => p.isCoinbaseWallet,                  installUrl: 'https://www.coinbase.com/wallet/downloads' },
+        { rdns: 'app.rainbow',         name: 'Rainbow',        icon: '🌈', test: p => p.isRainbow,                          installUrl: 'https://rainbow.me/download' },
+        { rdns: 'com.brave.wallet',    name: 'Brave Wallet',   icon: '🦁', test: p => p.isBraveWallet,                     installUrl: 'https://brave.com/wallet/' },
+        { rdns: 'com.trustwallet.app', name: 'Trust Wallet',   icon: '🛡️', test: p => p.isTrust,                           installUrl: 'https://trustwallet.com/download' },
     ];
 
-    const detected = [];
-    const installable = [];
-    for (const def of walletDefs) {
-        const provider = providers.find(p => def.test(p));
-        if (provider) {
-            detected.push({ ...def, provider });
-        } else {
-            installable.push(def);
-        }
-    }
-    // Catch any injected wallet not in the list above
-    if (detected.length === 0 && window.ethereum) {
-        detected.push({ name: 'Browser Wallet', icon: '🌐', provider: window.ethereum });
-    }
-
     list.innerHTML = '';
-    const makeRow = (icon, name, badge, onClick) => {
+
+    const makeRow = (iconHtml, name, subtext, badge, onClick) => {
         const btn = document.createElement('button');
         btn.className = 'wallet-option';
         btn.innerHTML = `
-            <div class="wallet-option-icon">${icon}</div>
+            <div class="wallet-option-icon">${iconHtml}</div>
             <div class="wallet-option-info">
                 <div class="wallet-option-name">${name}</div>
+                <div class="wallet-option-status">${subtext}</div>
             </div>
             <span class="wallet-option-badge">${badge}</span>`;
         btn.addEventListener('click', onClick);
         list.appendChild(btn);
     };
 
-    for (const w of detected) {
-        makeRow(w.icon, w.name, 'Connect', async () => {
-            closeWalletModal();
-            try {
-                const accounts = await w.provider.request({ method: 'eth_requestAccounts' });
-                if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
-            } catch (e) { console.warn('Wallet connect rejected:', e); }
-        });
+    const connectWith = async (provider) => {
+        closeWalletModal();
+        try {
+            const accounts = await provider.request({ method: 'eth_requestAccounts' });
+            if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
+        } catch (e) { console.warn('Wallet connect rejected:', e); }
+    };
+
+    // 1. EIP-6963 providers (desktop extensions) — the most reliable detection
+    for (const { info, provider } of _eip6963Providers) {
+        const iconHtml = info.icon
+            ? `<img src="${info.icon}" alt="${info.name}" style="width:100%;height:100%;object-fit:contain;">`
+            : '🌐';
+        makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider));
     }
-    for (const w of installable) {
-        makeRow(w.icon, w.name, 'Get', () => {
-            window.open(w.url, '_blank', 'noopener,noreferrer');
-            closeWalletModal();
-        });
+
+    // 2. Legacy window.ethereum (for wallets that don't announce via EIP-6963)
+    if (_eip6963Providers.length === 0 && window.ethereum) {
+        const legacyProviders = window.ethereum.providers || [window.ethereum];
+        for (const p of legacyProviders) {
+            const def = knownWallets.find(w => w.test(p));
+            const icon = def ? def.icon : '🌐';
+            const name = def ? def.name : 'Browser Wallet';
+            makeRow(icon, name, 'Detected', 'Connect', () => connectWith(p));
+        }
+    }
+
+    // 3. Mobile deep links — when no injected wallets, let user open the dapp inside their wallet app
+    if (_eip6963Providers.length === 0 && !window.ethereum && isMobile) {
+        for (const w of knownWallets) {
+            const deepLink = mobileLinks[w.rdns];
+            if (!deepLink) continue;
+            makeRow(w.icon, w.name, 'Open in app', 'Open', () => {
+                closeWalletModal();
+                window.location.href = deepLink;
+            });
+        }
+        // Explain why we're showing open links
+        const note = document.createElement('p');
+        note.style.cssText = 'font-size:0.72em;opacity:0.5;text-align:center;padding:10px 16px 4px;margin:0;line-height:1.5;';
+        note.textContent = 'Tapping "Open" loads this page inside your wallet\'s browser where you can connect.';
+        list.appendChild(note);
+    }
+
+    // 4. Desktop install options (always shown when wallet not detected on desktop)
+    if (!isMobile) {
+        const eip6963Rdns = new Set(_eip6963Providers.map(p => p.info.rdns));
+        for (const w of knownWallets) {
+            if (!eip6963Rdns.has(w.rdns) && !(window.ethereum && knownWallets.find(k => k.test(window.ethereum)))) {
+                makeRow(w.icon, w.name, 'Not installed', 'Get', () => {
+                    window.open(w.installUrl, '_blank', 'noopener,noreferrer');
+                    closeWalletModal();
+                });
+            }
+        }
+    }
+
+    if (list.children.length === 0) {
+        list.innerHTML = '<p style="padding:16px;text-align:center;opacity:0.5;font-size:0.85em;">No wallets detected.<br>Install a wallet extension to continue.</p>';
     }
 
     document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
