@@ -2090,16 +2090,18 @@ function displayProfile(data, ensName) {
         }
     }
 
-    // Populate profile card (avatar + display name)
+    // Populate profile hero card (avatar + name + bio)
     const profileCardEl = document.querySelector('.profile-card');
     if (profileCardEl) {
         const navLogoSrc = document.getElementById('nav-logo-img').src;
         const showDisplay = data.displayName && data.displayName !== ensName;
+        const bio = data.description || '';
         profileCardEl.innerHTML = `
             <img class="profile-card-avatar" src="${navLogoSrc}" alt="${ensName}">
             <div class="profile-card-info">
                 <div class="profile-card-name">${showDisplay ? data.displayName : ensName}</div>
                 ${showDisplay ? `<div class="profile-card-ens">${ensName}</div>` : ''}
+                ${bio ? `<div class="profile-card-bio">${bio}</div>` : ''}
             </div>`;
         profileCardEl.style.display = 'flex';
     }
