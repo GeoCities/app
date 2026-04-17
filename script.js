@@ -52,6 +52,11 @@ const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 let gridResizeHandler = null;
 let gridObserver = null;
 
+// Profile state
+let _currentProfileAddress = null;
+let _currentProfileEnsName = null;
+let _connectedWallet = null;
+
 // ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
 
 function _keccak256(data) {
@@ -1211,16 +1216,8 @@ async function generateDownload() {
         templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
         templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
 
-        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
-        let profileAddress = '[Address not found]';
-        // data.address is not directly available here. We rely on it being set in the dataset of coin-dropdown-content by displayProfile.
-        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
-            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
-        } else {
-            console.warn("generateDownload: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
-        }
         // The template will fetch its own address. Set a placeholder.
-        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
+        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, _currentProfileAddress || 'Loading address...');
         // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template, so no replacement needed here.
         
         // Add CSS variables for colors
@@ -1383,15 +1380,8 @@ async function downloadUsingXHR() {
                         templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
                         templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
                         
-                        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
-                        let profileAddress = '[Address not found]';
-                        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
-                            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
-                        } else {
-                             console.warn("downloadUsingXHR: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
-                        }
                         // The template will fetch its own address. Set a placeholder.
-                        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
+                        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, _currentProfileAddress || 'Loading address...');
                         // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template.
 
                         // Add CSS variables for colors
@@ -2048,21 +2038,9 @@ function displayProfile(data, ensName) {
     // Add Follow button to nav bar for registered profiles
     updateNavBar(ensName, true);
 
-    // Store address and profile type for coin dropdown, if the dropdown content element exists
-    const coinDropdownContent = document.getElementById('coin-dropdown-content');
-    if (coinDropdownContent) {
-        if (data.address) {
-            coinDropdownContent.dataset.address = data.address;
-            coinDropdownContent.dataset.ensName = ensName;
-            console.log(`Stored address ${data.address} and ensName ${ensName} for coin dropdown.`);
-        } else {
-            delete coinDropdownContent.dataset.address;
-            delete coinDropdownContent.dataset.ensName;
-            console.log('No address found for profile, cleared coin dropdown data.');
-        }
-    } else {
-        console.warn('coin-dropdown-content not found when trying to set address data.');
-    }
+    // Store profile address for crypto panel and downloads
+    _currentProfileAddress = data.address || null;
+    _currentProfileEnsName = ensName;
     
     // Clear existing records and reset display state
     if (profileRecords) profileRecords.innerHTML = '';
@@ -2074,6 +2052,8 @@ function displayProfile(data, ensName) {
     if (_profileCard) { _profileCard.innerHTML = ''; _profileCard.style.display = 'none'; }
     const _profileActions = document.querySelector('.profile-actions');
     if (_profileActions) { _profileActions.innerHTML = ''; _profileActions.style.display = 'none'; }
+    const _cryptoPanel = document.querySelector('.profile-crypto-panel');
+    if (_cryptoPanel) { _cryptoPanel.classList.remove('open'); }
 
     // Update avatar
     if (data.avatar) {
@@ -2116,27 +2096,18 @@ function displayProfile(data, ensName) {
         profileActionsEl.innerHTML = `
             <div class="profile-actions-row">
                 <a href="https://efp.app/${ensName}" target="_blank" rel="noopener noreferrer" class="profile-action-btn">Follow</a>
-                <button class="profile-action-btn" id="profile-send-btn">Send</button>
+                <button class="profile-action-btn" id="profile-crypto-btn">Crypto</button>
                 <a href="${editLink}" target="_blank" rel="noopener noreferrer" class="profile-action-btn">Edit Records</a>
             </div>`;
         profileActionsEl.style.display = 'block';
-        const sendBtn = document.getElementById('profile-send-btn');
-        if (sendBtn) {
-            sendBtn.addEventListener('click', () => {
-                const coinContent = document.getElementById('coin-dropdown-content');
-                const addr = coinContent ? coinContent.dataset.address : null;
-                if (addr && navigator.clipboard) {
-                    navigator.clipboard.writeText(addr).then(() => {
-                        sendBtn.textContent = 'Copied!';
-                        setTimeout(() => { sendBtn.textContent = 'Send'; }, 1500);
-                    }).catch(() => {
-                        const cb = document.getElementById('coin-dropdown-btn');
-                        if (cb) cb.click();
-                    });
-                } else {
-                    const cb = document.getElementById('coin-dropdown-btn');
-                    if (cb) cb.click();
-                }
+        const cryptoBtn = document.getElementById('profile-crypto-btn');
+        if (cryptoBtn) {
+            cryptoBtn.addEventListener('click', () => {
+                const panel = document.querySelector('.profile-crypto-panel');
+                if (!panel) return;
+                const isOpen = panel.classList.toggle('open');
+                cryptoBtn.classList.toggle('active', isOpen);
+                if (isOpen) populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
             });
         }
     }
@@ -2153,16 +2124,9 @@ function displayProfile(data, ensName) {
     }
 
     // Add records in specific order
-    // 1. Identity (ENS/Basename)
     const isBase = ensName.endsWith('.base.eth');
-    addProfileRecord(isBase ? 'Basename' : 'ENS', ensName);
 
-    // 2. Display Name (if different from ENS)
-    if (data.displayName && data.displayName !== ensName) {
-        addProfileRecord('Name', data.displayName);
-    }
-
-    // 3. Followers/Following from ethfollow.xyz API
+    // 1. Followers/Following from ethfollow.xyz API
     console.log('Display profile data:', JSON.stringify(data.ethFollow));
     
     if (data.ethFollow) {
@@ -2185,12 +2149,7 @@ function displayProfile(data, ensName) {
         addProfileRecord('Status', data.status);
     }
 
-    // 6. Bio (Description)
-    if (data.description) {
-        addProfileRecord('Bio', data.description);
-    }
-
-    // 7. Email
+    // 6. Email
     if (data.email) {
         addProfileRecord('Email', data.email);
     }
@@ -2353,6 +2312,126 @@ function normalizeUrl(url) {
     return url;
 }
 
+// Populate the inline crypto panel with QR code, address, and explorer link
+function populateCryptoPanel(address, ensName) {
+    const panel = document.querySelector('.profile-crypto-panel');
+    if (!panel) return;
+    const qrContainer = panel.querySelector('.crypto-qr-container');
+    const addrDiv = panel.querySelector('.crypto-wallet-address');
+    const copyBtn = panel.querySelector('.crypto-copy-btn');
+    const explorerBtn = panel.querySelector('.crypto-explorer-btn');
+
+    if (!address) {
+        if (addrDiv) addrDiv.textContent = 'No address found';
+        if (qrContainer) qrContainer.style.display = 'none';
+        if (explorerBtn) explorerBtn.style.display = 'none';
+        return;
+    }
+
+    if (addrDiv) addrDiv.textContent = address;
+
+    if (qrContainer && typeof QRCode !== 'undefined') {
+        qrContainer.innerHTML = '';
+        try {
+            new QRCode(qrContainer, { text: address, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+            qrContainer.style.display = 'block';
+        } catch (e) {
+            qrContainer.style.display = 'none';
+        }
+    }
+
+    if (explorerBtn && ensName) {
+        if (ensName.endsWith('.base.eth')) {
+            explorerBtn.textContent = 'Basescan';
+            explorerBtn.href = `https://basescan.org/name-lookup-search?id=${ensName}`;
+        } else {
+            explorerBtn.textContent = 'Etherscan';
+            explorerBtn.href = `https://etherscan.io/name-lookup-search?id=${ensName}`;
+        }
+        explorerBtn.style.display = 'flex';
+    } else if (explorerBtn) {
+        explorerBtn.style.display = 'none';
+    }
+
+    if (copyBtn) {
+        copyBtn.onclick = () => {
+            if (!navigator.clipboard) return;
+            navigator.clipboard.writeText(address).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy Address'; }, 2000);
+            });
+        };
+    }
+}
+
+// Update the nav wallet connect button UI based on _connectedWallet state
+function updateWalletUI() {
+    const btn = document.getElementById('wallet-connect-btn');
+    const statusDiv = document.getElementById('wallet-connect-status');
+    const actionBtn = document.getElementById('wallet-connect-action-btn');
+    const installLink = document.getElementById('wallet-install-link');
+    const disconnectBtn = document.getElementById('wallet-disconnect-btn');
+    if (!btn) return;
+
+    if (_connectedWallet) {
+        const short = `${_connectedWallet.slice(0, 6)}...${_connectedWallet.slice(-4)}`;
+        btn.textContent = short;
+        if (statusDiv) statusDiv.textContent = `Connected: ${short}`;
+        if (actionBtn) actionBtn.style.display = 'none';
+        if (installLink) installLink.style.display = 'none';
+        if (disconnectBtn) disconnectBtn.style.display = 'flex';
+    } else if (window.ethereum) {
+        btn.textContent = 'Connect';
+        if (statusDiv) statusDiv.textContent = 'No wallet connected';
+        if (actionBtn) { actionBtn.style.display = 'flex'; actionBtn.textContent = 'Connect Wallet'; }
+        if (installLink) installLink.style.display = 'none';
+        if (disconnectBtn) disconnectBtn.style.display = 'none';
+    } else {
+        btn.textContent = 'Connect';
+        if (statusDiv) statusDiv.textContent = 'No wallet detected';
+        if (actionBtn) actionBtn.style.display = 'none';
+        if (installLink) installLink.style.display = 'flex';
+        if (disconnectBtn) disconnectBtn.style.display = 'none';
+    }
+}
+
+// Wire up the wallet connect button interactions
+function initWalletConnect() {
+    updateWalletUI();
+
+    const actionBtn = document.getElementById('wallet-connect-action-btn');
+    if (actionBtn) {
+        actionBtn.addEventListener('click', async () => {
+            if (!window.ethereum) return;
+            try {
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                if (accounts.length) {
+                    _connectedWallet = accounts[0];
+                    updateWalletUI();
+                }
+            } catch (e) {
+                console.warn('Wallet connect rejected:', e);
+            }
+        });
+    }
+
+    const disconnectBtn = document.getElementById('wallet-disconnect-btn');
+    if (disconnectBtn) {
+        disconnectBtn.addEventListener('click', () => {
+            _connectedWallet = null;
+            updateWalletUI();
+            document.getElementById('wallet-connect-content')?.classList.remove('show');
+        });
+    }
+
+    if (window.ethereum) {
+        window.ethereum.on('accountsChanged', (accounts) => {
+            _connectedWallet = accounts.length ? accounts[0] : null;
+            updateWalletUI();
+        });
+    }
+}
+
 // Function to update the navigation bar based on the current view
 function updateNavBar(name, isRegistered) {
     const navBar = document.querySelector('.nav-bar');
@@ -2447,22 +2526,22 @@ function updateNavBar(name, isRegistered) {
         navButtons.appendChild(settingsContainerDiv);
         setupDropdown('settings-dropdown-btn', 'settings-dropdown-content');
 
-        // Create and append Coin Dropdown
-        const coinContainerDiv = document.createElement('div');
-        coinContainerDiv.id = 'coin-dropdown-btn-container';
-        coinContainerDiv.className = 'dropdown';
-        coinContainerDiv.innerHTML = `
-            <button id="coin-dropdown-btn" class="dropdown-btn">Wallet</button>
-            <div id="coin-dropdown-content" class="dropdown-content">
-                <h4>Send Crypto</h4>
-                <div id="coin-qr-code-container" style="margin:10px auto; width:150px; height:150px; display:none;"></div>
-                <div id="coin-wallet-address" style="word-wrap:break-word; text-align:center; margin:5px 0;">[Wallet Address]</div>
-                <button id="coin-copy-address-btn" class="dropdown-button">Copy Address</button>
-                <a id="coin-explorer-link-btn" class="dropdown-button" href="#" target="_blank" rel="noopener noreferrer" style="margin-top: 5px; display: none;">[Explorer Link]</a>
+        // Create Connect Wallet button (replaces old Wallet dropdown)
+        const connectContainerDiv = document.createElement('div');
+        connectContainerDiv.id = 'wallet-connect-container';
+        connectContainerDiv.className = 'dropdown';
+        connectContainerDiv.innerHTML = `
+            <button id="wallet-connect-btn" class="dropdown-btn">Connect</button>
+            <div id="wallet-connect-content" class="dropdown-content">
+                <div id="wallet-connect-status" style="text-align:center; padding:8px 0; font-size:0.85em; opacity:0.75;"></div>
+                <button id="wallet-connect-action-btn" class="dropdown-button" style="display:none;">Connect Wallet</button>
+                <a id="wallet-install-link" class="dropdown-button" href="https://metamask.io" target="_blank" rel="noopener noreferrer" style="display:none;">Install MetaMask</a>
+                <button id="wallet-disconnect-btn" class="dropdown-button" style="display:none;">Disconnect</button>
             </div>
         `;
-        navButtons.appendChild(coinContainerDiv);
-        setupDropdown('coin-dropdown-btn', 'coin-dropdown-content');
+        navButtons.appendChild(connectContainerDiv);
+        setupDropdown('wallet-connect-btn', 'wallet-connect-content');
+        initWalletConnect();
     }
 }
 
