@@ -55,6 +55,7 @@ let gridObserver = null;
 // Profile state
 let _currentProfileAddress = null;
 let _currentProfileEnsName = null;
+let _currentProfileData = null;
 let _connectedWallet = null;
 
 // ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
@@ -2038,9 +2039,10 @@ function displayProfile(data, ensName) {
     // Add Follow button to nav bar for registered profiles
     updateNavBar(ensName, true);
 
-    // Store profile address for crypto panel and downloads
+    // Store profile state for crypto panel, downloads, and edit records
     _currentProfileAddress = data.address || null;
     _currentProfileEnsName = ensName;
+    _currentProfileData = data;
     
     // Clear existing records and reset display state
     if (profileRecords) profileRecords.innerHTML = '';
@@ -2086,30 +2088,47 @@ function displayProfile(data, ensName) {
         profileCardEl.style.display = 'flex';
     }
 
-    // Populate action bar (Follow | Send | Edit)
+    // Populate action bar (Follow | Crypto | Edit Records)
     const profileActionsEl = document.querySelector('.profile-actions');
     if (profileActionsEl) {
-        const isBase2 = ensName.endsWith('.base.eth');
-        const editLink = isBase2
-            ? `https://www.base.org/name/${ensName.replace('.base.eth', '')}`
-            : `https://app.ens.domains/${ensName}`;
         profileActionsEl.innerHTML = `
             <div class="profile-actions-row">
-                <a href="https://efp.app/${ensName}" target="_blank" rel="noopener noreferrer" class="profile-action-btn">Follow</a>
+                <button class="profile-action-btn" id="profile-follow-btn">Follow</button>
                 <button class="profile-action-btn" id="profile-crypto-btn">Crypto</button>
-                <a href="${editLink}" target="_blank" rel="noopener noreferrer" class="profile-action-btn">Edit Records</a>
+                <button class="profile-action-btn" id="profile-edit-btn">Edit Records</button>
             </div>`;
         profileActionsEl.style.display = 'block';
-        const cryptoBtn = document.getElementById('profile-crypto-btn');
-        if (cryptoBtn) {
-            cryptoBtn.addEventListener('click', () => {
-                const panel = document.querySelector('.profile-crypto-panel');
-                if (!panel) return;
-                const isOpen = panel.classList.toggle('open');
-                cryptoBtn.classList.toggle('active', isOpen);
-                if (isOpen) populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
-            });
-        }
+
+        // Crypto panel toggle
+        document.getElementById('profile-crypto-btn')?.addEventListener('click', () => {
+            const panel = document.querySelector('.profile-crypto-panel');
+            if (!panel) return;
+            const isOpen = panel.classList.toggle('open');
+            document.getElementById('profile-crypto-btn').classList.toggle('active', isOpen);
+            if (isOpen) populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
+        });
+
+        // Follow: on-chain via EFP when wallet connected, else open efp.app
+        document.getElementById('profile-follow-btn')?.addEventListener('click', () => {
+            if (_connectedWallet) {
+                _efpFollow(_currentProfileAddress, _currentProfileEnsName);
+            } else {
+                window.open(`https://efp.app/${ensName}`, '_blank', 'noopener,noreferrer');
+            }
+        });
+
+        // Edit Records: inline modal when wallet connected, else link to ENS app
+        document.getElementById('profile-edit-btn')?.addEventListener('click', () => {
+            if (_connectedWallet) {
+                openEditRecordsModal();
+            } else {
+                const isBase2 = ensName.endsWith('.base.eth');
+                const editLink = isBase2
+                    ? `https://www.base.org/name/${ensName.replace('.base.eth', '')}`
+                    : `https://app.ens.domains/${ensName}`;
+                window.open(editLink, '_blank', 'noopener,noreferrer');
+            }
+        });
     }
 
     // Update header image if exists
@@ -2313,6 +2332,68 @@ function normalizeUrl(url) {
 }
 
 // Populate the inline crypto panel with QR code, address, and explorer link
+// EFP on-chain follow
+// Contracts (Ethereum mainnet):
+//   AccountMetadata: 0x5289fE5daBC021D02FDDf23d4a4DF96F4E0F17EF
+//   ListRegistry:    0x0E688f5DCa4a0a4729946ACbC44C792341714e08
+//   ListRecords:     0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33
+async function _efpFollow(targetAddress, targetEnsName) {
+    const followBtn = document.getElementById('profile-follow-btn');
+    const setFollowBtn = (text, disabled) => {
+        if (followBtn) { followBtn.textContent = text; followBtn.disabled = !!disabled; }
+    };
+    setFollowBtn('Following…', true);
+
+    try {
+        // 1. Get connected user's primary list from EFP API
+        const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet}/primary-list`);
+        if (!listResp.ok) throw new Error('no primary list');
+        const listData = await listResp.json();
+
+        // Extract token ID and storage location info from API response
+        const tokenId = listData.primary_list || listData.token_id || listData.list;
+        if (!tokenId && tokenId !== 0) throw new Error('no primary list token');
+
+        // 2. Get list storage location (chainId, contract, nonce/slot)
+        // Try EFP API first, then fallback to contract call
+        let listContract = '0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33';
+        let slot = BigInt(tokenId);
+
+        const locResp = await fetch(`https://api.ethfollow.xyz/api/v1/lists/${tokenId}/storage-location`).catch(() => null);
+        if (locResp && locResp.ok) {
+            const loc = await locResp.json();
+            const nonce = loc.nonce ?? loc.slot ?? loc.list_storage_location?.nonce;
+            const addr = loc.contract_address ?? loc.list_storage_location?.contract_address;
+            if (nonce !== undefined) slot = BigInt(nonce);
+            if (addr) listContract = addr;
+        }
+
+        // 3. Build the follow list operation bytes
+        // Format: version(1) || opcode=add(1) || record_version(1) || record_type=address(1) || address(20)
+        const addrHex = (targetAddress || '0x0000000000000000000000000000000000000000').replace('0x', '').padStart(40, '0');
+        const opBytes = '01010101' + addrHex; // 24 bytes
+        const opPadded = opBytes.padEnd(64, '0');
+
+        // 4. ABI encode applyListOp(uint256 slot, bytes op) — selector 0x5aaf83db
+        const slotHex = slot.toString(16).padStart(64, '0');
+        const bytesOffset = '0000000000000000000000000000000000000000000000000000000000000040';
+        const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
+        const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
+
+        await window.ethereum.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: _connectedWallet, to: listContract, data: calldata }]
+        });
+
+        setFollowBtn('Following!', false);
+        setTimeout(() => setFollowBtn('Follow', false), 3000);
+    } catch (e) {
+        console.warn('EFP on-chain follow failed, opening efp.app:', e);
+        setFollowBtn('Follow', false);
+        window.open(`https://efp.app/${targetEnsName || targetAddress}`, '_blank', 'noopener,noreferrer');
+    }
+}
+
 function populateCryptoPanel(address, ensName) {
     const panel = document.querySelector('.profile-crypto-panel');
     if (!panel) return;
@@ -2364,53 +2445,106 @@ function populateCryptoPanel(address, ensName) {
     }
 }
 
-// Update the nav wallet connect button UI based on _connectedWallet state
+// Update the nav wallet connect button appearance
 function updateWalletUI() {
     const btn = document.getElementById('wallet-connect-btn');
-    const statusDiv = document.getElementById('wallet-connect-status');
-    const actionBtn = document.getElementById('wallet-connect-action-btn');
-    const installLink = document.getElementById('wallet-install-link');
-    const disconnectBtn = document.getElementById('wallet-disconnect-btn');
     if (!btn) return;
-
     if (_connectedWallet) {
-        const short = `${_connectedWallet.slice(0, 6)}...${_connectedWallet.slice(-4)}`;
-        btn.textContent = short;
-        if (statusDiv) statusDiv.textContent = `Connected: ${short}`;
-        if (actionBtn) actionBtn.style.display = 'none';
-        if (installLink) installLink.style.display = 'none';
-        if (disconnectBtn) disconnectBtn.style.display = 'flex';
-    } else if (window.ethereum) {
-        btn.textContent = 'Connect';
-        if (statusDiv) statusDiv.textContent = 'No wallet connected';
-        if (actionBtn) { actionBtn.style.display = 'flex'; actionBtn.textContent = 'Connect Wallet'; }
-        if (installLink) installLink.style.display = 'none';
-        if (disconnectBtn) disconnectBtn.style.display = 'none';
+        btn.textContent = `${_connectedWallet.slice(0, 6)}...${_connectedWallet.slice(-4)}`;
+        const addrEl = document.getElementById('wallet-connected-address');
+        if (addrEl) addrEl.textContent = `${_connectedWallet.slice(0, 10)}...${_connectedWallet.slice(-6)}`;
+        const dropContent = document.getElementById('wallet-connect-content');
+        if (dropContent) dropContent.style.display = '';
     } else {
         btn.textContent = 'Connect';
-        if (statusDiv) statusDiv.textContent = 'No wallet detected';
-        if (actionBtn) actionBtn.style.display = 'none';
-        if (installLink) installLink.style.display = 'flex';
-        if (disconnectBtn) disconnectBtn.style.display = 'none';
+        const dropContent = document.getElementById('wallet-connect-content');
+        if (dropContent) dropContent.style.display = 'none';
     }
 }
+
+// Open the Rainbow-style wallet selection modal
+function openWalletModal() {
+    const modal = document.getElementById('wallet-modal');
+    const list = document.getElementById('wallet-modal-list');
+    if (!modal || !list) return;
+
+    // Detect available wallets
+    const providers = window.ethereum?.providers || (window.ethereum ? [window.ethereum] : []);
+    const walletDefs = [
+        { name: 'MetaMask',       icon: '🦊', test: p => p.isMetaMask && !p.isCoinbaseWallet, url: 'https://metamask.io/download/' },
+        { name: 'Coinbase Wallet',icon: '🔵', test: p => p.isCoinbaseWallet,                  url: 'https://www.coinbase.com/wallet/downloads' },
+        { name: 'Rainbow',        icon: '🌈', test: p => p.isRainbow,                          url: 'https://rainbow.me/download' },
+        { name: 'Brave Wallet',   icon: '🦁', test: p => p.isBraveWallet,                     url: 'https://brave.com/wallet/' },
+    ];
+
+    const detected = [];
+    const installable = [];
+    for (const def of walletDefs) {
+        const provider = providers.find(p => def.test(p));
+        if (provider) {
+            detected.push({ ...def, provider });
+        } else {
+            installable.push(def);
+        }
+    }
+    // Catch any injected wallet not in the list above
+    if (detected.length === 0 && window.ethereum) {
+        detected.push({ name: 'Browser Wallet', icon: '🌐', provider: window.ethereum });
+    }
+
+    list.innerHTML = '';
+    const makeRow = (icon, name, badge, onClick) => {
+        const btn = document.createElement('button');
+        btn.className = 'wallet-option';
+        btn.innerHTML = `
+            <div class="wallet-option-icon">${icon}</div>
+            <div class="wallet-option-info">
+                <div class="wallet-option-name">${name}</div>
+            </div>
+            <span class="wallet-option-badge">${badge}</span>`;
+        btn.addEventListener('click', onClick);
+        list.appendChild(btn);
+    };
+
+    for (const w of detected) {
+        makeRow(w.icon, w.name, 'Connect', async () => {
+            closeWalletModal();
+            try {
+                const accounts = await w.provider.request({ method: 'eth_requestAccounts' });
+                if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
+            } catch (e) { console.warn('Wallet connect rejected:', e); }
+        });
+    }
+    for (const w of installable) {
+        makeRow(w.icon, w.name, 'Get', () => {
+            window.open(w.url, '_blank', 'noopener,noreferrer');
+            closeWalletModal();
+        });
+    }
+
+    document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
+    modal.classList.add('open');
+}
+
+function closeWalletModal() {
+    document.getElementById('wallet-modal')?.classList.remove('open');
+}
+
+let _walletListenerAdded = false;
 
 // Wire up the wallet connect button interactions
 function initWalletConnect() {
     updateWalletUI();
 
-    const actionBtn = document.getElementById('wallet-connect-action-btn');
-    if (actionBtn) {
-        actionBtn.addEventListener('click', async () => {
-            if (!window.ethereum) return;
-            try {
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                if (accounts.length) {
-                    _connectedWallet = accounts[0];
-                    updateWalletUI();
-                }
-            } catch (e) {
-                console.warn('Wallet connect rejected:', e);
+    // Click: open modal if not connected, toggle dropdown if connected
+    const btn = document.getElementById('wallet-connect-btn');
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (_connectedWallet) {
+                document.getElementById('wallet-connect-content')?.classList.toggle('show');
+            } else {
+                openWalletModal();
             }
         });
     }
@@ -2424,11 +2558,127 @@ function initWalletConnect() {
         });
     }
 
-    if (window.ethereum) {
-        window.ethereum.on('accountsChanged', (accounts) => {
+    // Wire wallet modal close handlers (idempotent: modal is in the DOM once)
+    const modal = document.getElementById('wallet-modal');
+    if (modal && !modal.dataset.wired) {
+        modal.dataset.wired = '1';
+        document.getElementById('wallet-modal-close')?.addEventListener('click', closeWalletModal);
+        modal.addEventListener('click', e => { if (e.target === modal) closeWalletModal(); });
+    }
+
+    if (!_walletListenerAdded && window.ethereum) {
+        _walletListenerAdded = true;
+        window.ethereum.on('accountsChanged', accounts => {
             _connectedWallet = accounts.length ? accounts[0] : null;
             updateWalletUI();
         });
+    }
+}
+
+// ===== ABI helpers for ENS setText =====
+function _abiEncodeSetText(namehashHex, key, value) {
+    const encStr = (s) => {
+        const bytes = new TextEncoder().encode(s);
+        const padded = Math.ceil(bytes.length / 32) * 32 || 32;
+        let h = bytes.length.toString(16).padStart(64, '0');
+        for (const b of bytes) h += b.toString(16).padStart(2, '0');
+        return h.padEnd(64 + padded * 2, '0');
+    };
+    const nh = namehashHex.replace('0x', '').padStart(64, '0');
+    const keyEnc = encStr(key);
+    const valueEnc = encStr(value);
+    const keyLen = Math.ceil(new TextEncoder().encode(key).length / 32) * 32 || 32;
+    const keyOff = (96).toString(16).padStart(64, '0');
+    const valOff = (96 + 32 + keyLen).toString(16).padStart(64, '0');
+    return '0x10f13a8c' + nh + keyOff + valOff + keyEnc + valueEnc;
+}
+
+// ===== Edit Records modal =====
+function _escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _escapeAttr(s) { return String(s).replace(/"/g,'&quot;'); }
+
+async function openEditRecordsModal() {
+    const modal = document.getElementById('edit-records-modal');
+    const body = document.getElementById('edit-modal-body');
+    if (!modal || !body) return;
+
+    const p = _currentProfileData || {};
+    const fields = [
+        { key: 'name',         label: 'Display Name', value: p.displayName || '' },
+        { key: 'description',  label: 'Bio',          value: p.description || '', multiline: true },
+        { key: 'location',     label: 'Location',     value: p.location || '' },
+        { key: 'status',       label: 'Status',       value: p.status || '' },
+        { key: 'email',        label: 'Email',        value: p.email || '' },
+        { key: 'url',          label: 'Website',      value: p.links?.website?.handle || '' },
+        { key: 'com.twitter',  label: 'Twitter',      value: p.links?.twitter?.handle || '' },
+        { key: 'com.github',   label: 'GitHub',       value: p.links?.github?.handle || '' },
+        { key: 'com.discord',  label: 'Discord',      value: p.links?.discord?.handle || '' },
+        { key: 'org.telegram', label: 'Telegram',     value: p.links?.telegram?.handle || '' },
+        { key: 'xyz.farcaster',label: 'Farcaster',    value: p.links?.farcaster?.handle || '' },
+        { key: 'avatar',       label: 'Avatar URL',   value: p.avatar || '' },
+    ];
+
+    body.innerHTML = fields.map(f => `
+        <div class="edit-field">
+            <label>${f.label}</label>
+            ${f.multiline
+                ? `<textarea data-key="${f.key}">${_escapeHtml(f.value)}</textarea>`
+                : `<input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}">`}
+        </div>`).join('');
+
+    const saveBtn = document.getElementById('edit-modal-save');
+    if (saveBtn) saveBtn.onclick = () => _saveRecords(fields);
+
+    if (!modal.dataset.wired) {
+        modal.dataset.wired = '1';
+        document.getElementById('edit-modal-close')?.addEventListener('click', () => modal.classList.remove('open'));
+        modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+    }
+    modal.classList.add('open');
+}
+
+async function _saveRecords(originalFields) {
+    if (!_connectedWallet) { openWalletModal(); return; }
+    const body = document.getElementById('edit-modal-body');
+    const saveBtn = document.getElementById('edit-modal-save');
+    const ensName = _currentProfileEnsName;
+
+    const changes = [];
+    for (const f of originalFields) {
+        const el = body.querySelector(`[data-key="${f.key}"]`);
+        if (!el) continue;
+        const newVal = el.value.trim();
+        if (newVal !== f.value) changes.push({ key: f.key, value: newVal });
+    }
+    if (changes.length === 0) {
+        document.getElementById('edit-records-modal')?.classList.remove('open');
+        return;
+    }
+
+    try {
+        const nhBytes = _ensNamehash(ensName);
+        const nhHex = _toHex(nhBytes);
+        const resolverResult = await _ethCall('0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e', '0x0178b8bf' + nhHex);
+        if (!resolverResult || resolverResult.length < 42) throw new Error('No resolver');
+        const resolver = '0x' + resolverResult.slice(-40);
+        if (/^0x0+$/.test(resolver)) throw new Error('Zero resolver');
+
+        for (let i = 0; i < changes.length; i++) {
+            if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
+            const { key, value } = changes[i];
+            await window.ethereum.request({
+                method: 'eth_sendTransaction',
+                params: [{ from: _connectedWallet, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
+            });
+        }
+        if (saveBtn) saveBtn.textContent = 'Saved!';
+        setTimeout(() => {
+            document.getElementById('edit-records-modal')?.classList.remove('open');
+            if (saveBtn) saveBtn.textContent = 'Save Changes';
+        }, 2000);
+    } catch (e) {
+        console.error('Save records failed:', e);
+        if (saveBtn) { saveBtn.textContent = 'Error — retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 3000); }
     }
 }
 
@@ -2526,21 +2776,18 @@ function updateNavBar(name, isRegistered) {
         navButtons.appendChild(settingsContainerDiv);
         setupDropdown('settings-dropdown-btn', 'settings-dropdown-content');
 
-        // Create Connect Wallet button (replaces old Wallet dropdown)
+        // Create Connect Wallet button — click opens modal when disconnected, dropdown when connected
         const connectContainerDiv = document.createElement('div');
         connectContainerDiv.id = 'wallet-connect-container';
         connectContainerDiv.className = 'dropdown';
         connectContainerDiv.innerHTML = `
             <button id="wallet-connect-btn" class="dropdown-btn">Connect</button>
-            <div id="wallet-connect-content" class="dropdown-content">
-                <div id="wallet-connect-status" style="text-align:center; padding:8px 0; font-size:0.85em; opacity:0.75;"></div>
-                <button id="wallet-connect-action-btn" class="dropdown-button" style="display:none;">Connect Wallet</button>
-                <a id="wallet-install-link" class="dropdown-button" href="https://metamask.io" target="_blank" rel="noopener noreferrer" style="display:none;">Install MetaMask</a>
-                <button id="wallet-disconnect-btn" class="dropdown-button" style="display:none;">Disconnect</button>
+            <div id="wallet-connect-content" class="dropdown-content" style="display:none;">
+                <div id="wallet-connected-address" style="padding:10px 14px; font-size:0.75em; opacity:0.65; word-break:break-all;"></div>
+                <button id="wallet-disconnect-btn" class="dropdown-button">Disconnect</button>
             </div>
         `;
         navButtons.appendChild(connectContainerDiv);
-        setupDropdown('wallet-connect-btn', 'wallet-connect-content');
         initWalletConnect();
     }
 }
@@ -3714,13 +3961,19 @@ function setupDropdown(btnId, contentId) {
 document.addEventListener('click', (e) => {
     const openDropdowns = document.querySelectorAll('.dropdown-content.show');
     openDropdowns.forEach(dropdownContent => {
-        const btnId = dropdownContent.id.replace('-content', '-btn'); // Assumes button ID convention
+        const btnId = dropdownContent.id.replace('-content', '-btn');
         const dropdownBtn = document.getElementById(btnId);
-
         if (dropdownBtn && !dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
             dropdownContent.classList.remove('show');
         }
     });
+    // Close wallet connected dropdown if clicking outside
+    const walletContent = document.getElementById('wallet-connect-content');
+    const walletBtn = document.getElementById('wallet-connect-btn');
+    if (walletContent && walletContent.classList.contains('show') &&
+        walletBtn && !walletBtn.contains(e.target) && !walletContent.contains(e.target)) {
+        walletContent.classList.remove('show');
+    }
 });
 
 // Function to handle cycling words in the slogan

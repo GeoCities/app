@@ -101,6 +101,31 @@
         <a href="https://geocities.eth.link" target="_blank" rel="noopener noreferrer">GeoCities</a>
     </footer>
 
+    <!-- Wallet selection modal -->
+    <div id="wallet-modal" class="wallet-modal-overlay" role="dialog" aria-modal="true" aria-label="Connect Wallet">
+        <div class="wallet-modal-card">
+            <div class="wallet-modal-header">
+                <span>Connect Wallet</span>
+                <button id="wallet-modal-close" class="wallet-modal-close" aria-label="Close">&#x2715;</button>
+            </div>
+            <div id="wallet-modal-list" class="wallet-modal-list"></div>
+        </div>
+    </div>
+
+    <!-- Edit ENS Records modal -->
+    <div id="edit-records-modal" class="edit-modal-overlay" role="dialog" aria-modal="true" aria-label="Edit Records">
+        <div class="edit-modal-card">
+            <div class="edit-modal-header">
+                <span>Edit Records</span>
+                <button id="edit-modal-close" class="wallet-modal-close" aria-label="Close">&#x2715;</button>
+            </div>
+            <div id="edit-modal-body" class="edit-modal-body"></div>
+            <div class="edit-modal-footer">
+                <button id="edit-modal-save" class="dropdown-button edit-modal-save-btn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="script.js"></script>
