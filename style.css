@@ -1470,6 +1470,154 @@ h1#homepage-geocities {
     display: none;
 }
 
+/* Crypto panel tabs */
+.crypto-tabs {
+    display: flex;
+    width: 100%;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 14px;
+}
+
+.crypto-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--primary-color);
+    font-family: inherit;
+    font-size: 0.8em;
+    letter-spacing: 0.08em;
+    padding: 8px 0;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s, border-color 0.15s;
+    margin-bottom: -1px;
+}
+
+.crypto-tab.active {
+    opacity: 1;
+    border-bottom: 2px solid var(--primary-color);
+}
+
+.crypto-tab-body {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.crypto-tab-body.active {
+    display: flex;
+}
+
+/* Send / Swap form layout */
+.send-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+}
+
+.edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.edit-field.narrow {
+    max-width: 100px;
+}
+
+.edit-field label {
+    font-size: 0.7em;
+    opacity: 0.6;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.edit-field input,
+.edit-field-select {
+    background: var(--background-color);
+    border: 1px solid var(--border-color);
+    color: var(--primary-color);
+    font-family: inherit;
+    font-size: 0.85em;
+    padding: 7px 10px;
+    width: 100%;
+    box-sizing: border-box;
+    outline: none;
+    appearance: none;
+}
+
+.swap-arrow {
+    font-size: 1.4em;
+    opacity: 0.5;
+}
+
+.swap-estimate-val {
+    font-size: 0.85em;
+    padding: 7px 10px;
+    border: 1px solid var(--border-color);
+    width: 100%;
+    box-sizing: border-box;
+    opacity: 0.75;
+    word-break: break-all;
+}
+
+.crypto-status {
+    font-size: 0.75em;
+    text-align: center;
+    opacity: 0.75;
+    min-height: 1.2em;
+    word-break: break-word;
+    width: 100%;
+}
+
+/* Register modal */
+.register-availability {
+    font-size: 0.85em;
+    padding: 6px 0;
+    text-align: center;
+}
+
+.register-price {
+    font-size: 0.85em;
+    opacity: 0.75;
+    text-align: center;
+}
+
+.register-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    margin-top: 6px;
+}
+
+.register-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.82em;
+}
+
+.register-step.dim {
+    opacity: 0.4;
+}
+
+.step-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid var(--primary-color);
+    flex-shrink: 0;
+}
+
+.step-dot.done {
+    background: var(--primary-color);
+}
+
 /* Posts section header */
 .posts-section-header {
     padding: 8px 15px;

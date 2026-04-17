@@ -48,6 +48,22 @@ const OTHER_ENS_NAMES = [
 // Combined array for backward compatibility
 const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 
+// ENS on-chain contract addresses
+const ENS_REGISTRAR = '0x253553366Da8546fC250F225fe3d25d0C782303b';
+const ENS_PUBLIC_RESOLVER = '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63';
+
+// Token definitions (symbol → address + decimals)
+const TOKENS = {
+    ETH:  { symbol: 'ETH',  address: null,                                           decimals: 18 },
+    USDC: { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6  },
+    USDT: { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6  },
+    DAI:  { symbol: 'DAI',  address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18 },
+    WETH: { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', decimals: 18 },
+    ENS:  { symbol: 'ENS',  address: '0xC18360217D8F7Ab5e7c516566761Ea12Ce7F9D72', decimals: 18 },
+};
+const PARASWAP_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+let _lastSwapQuote = null;
+
 // EIP-6963 multi-wallet discovery — collected at startup
 const _eip6963Providers = [];
 window.addEventListener('eip6963:announceProvider', (event) => {
@@ -2406,50 +2422,118 @@ async function _efpFollow(targetAddress, targetEnsName) {
 function populateCryptoPanel(address, ensName) {
     const panel = document.querySelector('.profile-crypto-panel');
     if (!panel) return;
+
+    // Tab switching
+    panel.querySelectorAll('.crypto-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            panel.querySelectorAll('.crypto-tab').forEach(t => t.classList.remove('active'));
+            panel.querySelectorAll('.crypto-tab-body').forEach(b => b.classList.remove('active'));
+            tab.classList.add('active');
+            const body = document.getElementById(`crypto-${tab.dataset.tab}-body`);
+            if (body) body.classList.add('active');
+        });
+    });
+
+    // Receive tab
     const qrContainer = panel.querySelector('.crypto-qr-container');
     const addrDiv = panel.querySelector('.crypto-wallet-address');
     const copyBtn = panel.querySelector('.crypto-copy-btn');
     const explorerBtn = panel.querySelector('.crypto-explorer-btn');
 
-    if (!address) {
+    if (address) {
+        if (addrDiv) addrDiv.textContent = address;
+        if (qrContainer && typeof QRCode !== 'undefined') {
+            qrContainer.innerHTML = '';
+            try {
+                new QRCode(qrContainer, { text: address, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+                qrContainer.style.display = 'block';
+            } catch (e) { qrContainer.style.display = 'none'; }
+        }
+        if (explorerBtn) {
+            if (ensName && ensName.endsWith('.base.eth')) {
+                explorerBtn.textContent = 'Basescan';
+                explorerBtn.href = `https://basescan.org/name-lookup-search?id=${ensName}`;
+            } else {
+                explorerBtn.textContent = 'Etherscan';
+                explorerBtn.href = `https://etherscan.io/name-lookup-search?id=${ensName}`;
+            }
+            explorerBtn.style.display = 'flex';
+        }
+        if (copyBtn) {
+            copyBtn.onclick = () => {
+                if (!navigator.clipboard) return;
+                navigator.clipboard.writeText(address).then(() => {
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyBtn.textContent = 'Copy Address'; }, 2000);
+                });
+            };
+        }
+    } else {
         if (addrDiv) addrDiv.textContent = 'No address found';
         if (qrContainer) qrContainer.style.display = 'none';
         if (explorerBtn) explorerBtn.style.display = 'none';
-        return;
     }
 
-    if (addrDiv) addrDiv.textContent = address;
-
-    if (qrContainer && typeof QRCode !== 'undefined') {
-        qrContainer.innerHTML = '';
-        try {
-            new QRCode(qrContainer, { text: address, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
-            qrContainer.style.display = 'block';
-        } catch (e) {
-            qrContainer.style.display = 'none';
-        }
+    // Send tab
+    const sendBtn = document.getElementById('send-submit-btn');
+    const sendStatus = document.getElementById('send-status');
+    if (sendBtn) {
+        sendBtn.onclick = async () => {
+            const toInput = document.getElementById('send-to')?.value?.trim();
+            const amount = document.getElementById('send-amount')?.value?.trim();
+            const token = document.getElementById('send-token')?.value;
+            if (!toInput || !amount) { if (sendStatus) sendStatus.textContent = 'Please fill in all fields.'; return; }
+            sendBtn.disabled = true;
+            if (sendStatus) sendStatus.textContent = 'Sending…';
+            try {
+                const txHash = await sendToken(toInput, amount, token);
+                if (sendStatus) sendStatus.textContent = `Sent! Tx: ${txHash.slice(0,10)}…`;
+            } catch (e) {
+                if (sendStatus) sendStatus.textContent = `Error: ${e.message || e}`;
+            } finally { sendBtn.disabled = false; }
+        };
     }
 
-    if (explorerBtn && ensName) {
-        if (ensName.endsWith('.base.eth')) {
-            explorerBtn.textContent = 'Basescan';
-            explorerBtn.href = `https://basescan.org/name-lookup-search?id=${ensName}`;
-        } else {
-            explorerBtn.textContent = 'Etherscan';
-            explorerBtn.href = `https://etherscan.io/name-lookup-search?id=${ensName}`;
-        }
-        explorerBtn.style.display = 'flex';
-    } else if (explorerBtn) {
-        explorerBtn.style.display = 'none';
+    // Swap tab
+    const quoteBtn = document.getElementById('swap-quote-btn');
+    const execBtn = document.getElementById('swap-exec-btn');
+    const swapStatus = document.getElementById('swap-status');
+    if (quoteBtn) {
+        quoteBtn.onclick = async () => {
+            const fromSym = document.getElementById('swap-from')?.value;
+            const toSym = document.getElementById('swap-to')?.value;
+            const amount = document.getElementById('swap-amount')?.value?.trim();
+            if (!amount || fromSym === toSym) { if (swapStatus) swapStatus.textContent = 'Please enter amount and different tokens.'; return; }
+            quoteBtn.disabled = true;
+            if (swapStatus) swapStatus.textContent = 'Getting quote…';
+            try {
+                const quote = await getSwapQuote(fromSym, toSym, amount);
+                _lastSwapQuote = quote;
+                const estEl = document.getElementById('swap-estimate');
+                if (estEl) estEl.textContent = quote.estimate;
+                if (swapStatus) swapStatus.textContent = '';
+                if (execBtn) execBtn.style.display = 'block';
+            } catch (e) {
+                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                _lastSwapQuote = null;
+                if (execBtn) execBtn.style.display = 'none';
+            } finally { quoteBtn.disabled = false; }
+        };
     }
-
-    if (copyBtn) {
-        copyBtn.onclick = () => {
-            if (!navigator.clipboard) return;
-            navigator.clipboard.writeText(address).then(() => {
-                copyBtn.textContent = 'Copied!';
-                setTimeout(() => { copyBtn.textContent = 'Copy Address'; }, 2000);
-            });
+    if (execBtn) {
+        execBtn.onclick = async () => {
+            if (!_lastSwapQuote) return;
+            execBtn.disabled = true;
+            if (swapStatus) swapStatus.textContent = 'Swapping…';
+            try {
+                const txHash = await executeSwap(_lastSwapQuote);
+                if (swapStatus) swapStatus.textContent = `Swapped! Tx: ${txHash.slice(0,10)}…`;
+                if (execBtn) execBtn.style.display = 'none';
+                _lastSwapQuote = null;
+            } catch (e) {
+                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                execBtn.disabled = false;
+            }
         };
     }
 }
@@ -2820,7 +2904,7 @@ function updateNavBar(name, isRegistered) {
                     <h4><span class="step-num">2</span> Publish</h4>
                     <div class="dropdown-buttons">
                         <a href="#" class="dropdown-button download-website-button" id="nav-download-website">Download</a>
-                        <a href="https://pinata.cloud/" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy to IPFS</a>
+                        <a href="#" class="dropdown-button deploy-website-button" id="nav-deploy-ipfs">Deploy to IPFS</a>
                         <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect to ENS</a>
                     </div>
                 </div>
@@ -2924,23 +3008,19 @@ function displayUnregisteredProfile(ensName) {
         profilePage.appendChild(registerContainer);
     }
     
-    // Add register button with appropriate link and text
-    const registerButton = document.createElement('a');
-    registerButton.className = 'register-button';
-    
+    // Add register button
+    const registerButton = document.createElement('button');
+    registerButton.className = 'register-button dropdown-button';
+
     if (isBasename) {
-        // For Basenames, use the Base names URL format
         const basenameWithoutSuffix = ensName.replace('.base.eth', '');
-        registerButton.href = `https://www.base.org/names?claim=${basenameWithoutSuffix}`;
         registerButton.textContent = 'Register Basename';
+        registerButton.onclick = () => window.open(`https://www.base.org/names?claim=${basenameWithoutSuffix}`, '_blank', 'noopener,noreferrer');
     } else {
-        // For ENS names, use the ENS domains URL format
-        registerButton.href = `https://app.ens.domains/${ensName}`;
         registerButton.textContent = 'Register ENS';
+        registerButton.onclick = () => openRegisterModal(ensName);
     }
-    
-    registerButton.target = '_blank';
-    registerButton.rel = 'noopener noreferrer';
+
     registerContainer.innerHTML = '';
     registerContainer.appendChild(registerButton);
     
@@ -3924,6 +4004,9 @@ function setupDropdown(btnId, contentId) {
 
         if (navDownloadWebsite) navDownloadWebsite.addEventListener('click', (e) => { e.preventDefault(); generateDownload(); });
 
+        const navDeployIPFS = content.querySelector('#nav-deploy-ipfs');
+        if (navDeployIPFS) navDeployIPFS.addEventListener('click', (e) => { e.preventDefault(); openIPFSModal(); });
+
         const profilePage = document.getElementById('profile-page');
         if (profilePage) {
             const observer = new MutationObserver((mutations) => {
@@ -4069,6 +4152,361 @@ function initializeCyclingWords() {
     
     // Start cycling
     cycleInterval = setInterval(cycleWords, 1785); // Change word every 1.785 seconds (15% faster than 2.1 seconds)
+}
+
+// ─── ethers.js helpers ───────────────────────────────────────────────────────
+
+function _getProvider() {
+    return new ethers.providers.Web3Provider(window.ethereum);
+}
+
+function _getReadProvider() {
+    return new ethers.providers.JsonRpcProvider('https://cloudflare-eth.com');
+}
+
+async function _getSigner() {
+    const provider = _getProvider();
+    await provider.send('eth_requestAccounts', []);
+    return provider.getSigner();
+}
+
+async function resolveRecipient(input) {
+    input = input.trim();
+    if (ethers.utils.isAddress(input)) return input;
+    const provider = _getReadProvider();
+    const resolved = await provider.resolveName(input);
+    if (!resolved) throw new Error(`Could not resolve "${input}"`);
+    return resolved;
+}
+
+// ─── Send crypto ─────────────────────────────────────────────────────────────
+
+async function sendToken(toInput, amount, tokenSymbol) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const signer = await _getSigner();
+    const to = await resolveRecipient(toInput);
+    const token = TOKENS[tokenSymbol];
+    if (!token) throw new Error(`Unknown token: ${tokenSymbol}`);
+
+    if (!token.address) {
+        // Native ETH transfer
+        const value = ethers.utils.parseEther(amount);
+        const tx = await signer.sendTransaction({ to, value });
+        await tx.wait();
+        return tx.hash;
+    } else {
+        // ERC-20 transfer
+        const erc20 = new ethers.Contract(token.address, [
+            'function transfer(address,uint256) returns (bool)',
+            'function decimals() view returns (uint8)'
+        ], signer);
+        const decimals = token.decimals;
+        const value = ethers.utils.parseUnits(amount, decimals);
+        const tx = await erc20.transfer(to, value);
+        await tx.wait();
+        return tx.hash;
+    }
+}
+
+// ─── Swap (ParaSwap v5) ───────────────────────────────────────────────────────
+
+function _paraswapAddr(sym) {
+    return sym === 'ETH' ? PARASWAP_ETH : (TOKENS[sym]?.address || null);
+}
+
+async function getSwapQuote(fromSym, toSym, amount) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const provider = _getProvider();
+    const accounts = await provider.listAccounts();
+    if (!accounts.length) throw new Error('Connect wallet first');
+    const userAddr = accounts[0];
+
+    const srcToken = _paraswapAddr(fromSym);
+    const destToken = _paraswapAddr(toSym);
+    const srcDecimals = TOKENS[fromSym]?.decimals || 18;
+    const destDecimals = TOKENS[toSym]?.decimals || 18;
+    const srcAmount = ethers.utils.parseUnits(amount, srcDecimals).toString();
+
+    const url = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${srcAmount}&srcDecimals=${srcDecimals}&destDecimals=${destDecimals}&side=SELL&network=1&userAddress=${userAddr}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`ParaSwap error: ${resp.status}`);
+    const data = await resp.json();
+    if (!data.priceRoute) throw new Error(data.error || 'No route found');
+
+    const destAmt = ethers.utils.formatUnits(data.priceRoute.destAmount, destDecimals);
+    return { priceRoute: data.priceRoute, estimate: `~${parseFloat(destAmt).toFixed(6)} ${toSym}`, srcAmount, srcToken, destToken, srcDecimals, destDecimals, userAddr, fromSym, toSym };
+}
+
+async function executeSwap(quote) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const signer = await _getSigner();
+    const userAddr = quote.userAddr;
+
+    const txResp = await fetch(`https://apiv5.paraswap.io/transactions/1?ignoreChecks=true`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            srcToken: quote.srcToken, destToken: quote.destToken,
+            srcAmount: quote.srcAmount, destAmount: quote.priceRoute.destAmount,
+            priceRoute: quote.priceRoute, userAddress: userAddr,
+            slippage: 100, srcDecimals: quote.srcDecimals, destDecimals: quote.destDecimals
+        })
+    });
+    if (!txResp.ok) throw new Error(`ParaSwap tx error: ${txResp.status}`);
+    const txData = await txResp.json();
+
+    // Approve ERC-20 if needed
+    if (quote.fromSym !== 'ETH') {
+        const tokenAddr = TOKENS[quote.fromSym].address;
+        const erc20 = new ethers.Contract(tokenAddr, ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'], signer);
+        const allowance = await erc20.allowance(userAddr, txData.to);
+        if (allowance.lt(ethers.BigNumber.from(quote.srcAmount))) {
+            const approveTx = await erc20.approve(txData.to, ethers.constants.MaxUint256);
+            await approveTx.wait();
+        }
+    }
+
+    const tx = await signer.sendTransaction({ to: txData.to, data: txData.data, value: ethers.BigNumber.from(txData.value || '0'), gasLimit: txData.gas ? ethers.BigNumber.from(txData.gas) : undefined });
+    await tx.wait();
+    return tx.hash;
+}
+
+// ─── ENS Registration ─────────────────────────────────────────────────────────
+
+const _REGISTRAR_ABI = [
+    'function available(string) view returns (bool)',
+    'function rentPrice(string,uint256) view returns (tuple(uint256 base,uint256 premium))',
+    'function makeCommitment(string,address,uint256,bytes32,address,bytes[],bool,uint16) pure returns (bytes32)',
+    'function commit(bytes32)',
+    'function register(string,address,uint256,bytes32,address,bytes[],bool,uint16) payable'
+];
+
+async function openRegisterModal(ensName) {
+    const modal = document.getElementById('register-modal');
+    const body = document.getElementById('register-modal-body');
+    const title = document.getElementById('register-modal-title');
+    const submitBtn = document.getElementById('register-submit-btn');
+    if (!modal || !body) return;
+
+    const label = ensName.replace(/\.eth$/, '');
+    if (title) title.textContent = `Register ${ensName}`;
+    submitBtn.style.display = 'none';
+    body.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.6;">Checking availability…</div>';
+    modal.style.display = 'flex';
+
+    try {
+        const provider = _getReadProvider();
+        const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, provider);
+        const available = await registrar.available(label);
+
+        if (!available) {
+            body.innerHTML = '<div class="register-availability" style="color:#e44;">Name is already registered.</div>';
+            return;
+        }
+
+        const YEAR_SECS = 365 * 24 * 3600;
+        const price = await registrar.rentPrice(label, YEAR_SECS);
+        const totalWei = price.base.add(price.premium);
+        const totalEth = parseFloat(ethers.utils.formatEther(totalWei)).toFixed(6);
+
+        body.innerHTML = `
+            <div class="register-availability" style="color:#4a4;">✓ Available</div>
+            <div class="register-price">~${totalEth} ETH / year</div>
+            <div class="register-steps">
+                <div class="register-step" id="reg-step1"><span class="step-dot" id="reg-dot1"></span>Step 1: Commit</div>
+                <div class="register-step dim" id="reg-step2"><span class="step-dot" id="reg-dot2"></span>Step 2: Wait 60s</div>
+                <div class="register-step dim" id="reg-step3"><span class="step-dot" id="reg-dot3"></span>Step 3: Register</div>
+            </div>
+            <div id="reg-status" class="crypto-status" style="margin-top:10px;"></div>
+        `;
+        submitBtn.style.display = 'block';
+        submitBtn.textContent = 'Register';
+        submitBtn.onclick = () => _executeRegistration(label, ensName, totalWei);
+    } catch (e) {
+        body.innerHTML = `<div class="register-availability">Error: ${e.message || e}</div>`;
+    }
+
+    document.getElementById('register-modal-close').onclick = () => { modal.style.display = 'none'; };
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+}
+
+async function _executeRegistration(label, ensName, priceWei) {
+    if (!window.ethereum) { alert('Connect your wallet first.'); return; }
+    const submitBtn = document.getElementById('register-submit-btn');
+    const status = document.getElementById('reg-status');
+    const setStatus = (msg) => { if (status) status.textContent = msg; };
+
+    submitBtn.disabled = true;
+    try {
+        const signer = await _getSigner();
+        const userAddr = await signer.getAddress();
+        const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, signer);
+
+        const YEAR_SECS = 365 * 24 * 3600;
+        const secret = ethers.utils.randomBytes(32);
+        const commitment = await registrar.makeCommitment(label, userAddr, YEAR_SECS, secret, ENS_PUBLIC_RESOLVER, [], false, 0);
+
+        setStatus('Sending commit transaction…');
+        document.getElementById('reg-dot1').classList.add('done');
+        const commitTx = await registrar.commit(commitment);
+        await commitTx.wait();
+
+        document.getElementById('reg-step2').classList.remove('dim');
+        setStatus('Waiting 60 seconds before registration…');
+        await new Promise(r => setTimeout(r, 62000));
+
+        document.getElementById('reg-dot2').classList.add('done');
+        document.getElementById('reg-step3').classList.remove('dim');
+        setStatus('Sending register transaction…');
+
+        // Add 10% buffer on price
+        const value = priceWei.mul(110).div(100);
+        const registerTx = await registrar.register(label, userAddr, YEAR_SECS, secret, ENS_PUBLIC_RESOLVER, [], false, 0, { value });
+        await registerTx.wait();
+
+        document.getElementById('reg-dot3').classList.add('done');
+        setStatus(`${ensName} registered! Tx: ${registerTx.hash.slice(0,10)}…`);
+        submitBtn.style.display = 'none';
+    } catch (e) {
+        setStatus(`Error: ${e.message || e}`);
+        submitBtn.disabled = false;
+    }
+}
+
+// ─── IPFS Deploy (Pinata) ─────────────────────────────────────────────────────
+
+function _base58Decode(s) {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let n = BigInt(0);
+    for (const c of s) {
+        const idx = ALPHABET.indexOf(c);
+        if (idx < 0) throw new Error('Invalid base58 char: ' + c);
+        n = n * BigInt(58) + BigInt(idx);
+    }
+    const bytes = [];
+    while (n > 0n) { bytes.unshift(Number(n & 0xffn)); n >>= 8n; }
+    for (const c of s) { if (c !== '1') break; bytes.unshift(0); }
+    return new Uint8Array(bytes);
+}
+
+function _cidToContenthash(cid) {
+    const decoded = _base58Decode(cid);
+    const prefix = new Uint8Array([0xe3, 0x01, 0x01, 0x70]);
+    const result = new Uint8Array(prefix.length + decoded.length);
+    result.set(prefix); result.set(decoded, prefix.length);
+    return '0x' + Array.from(result).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function openIPFSModal() {
+    const modal = document.getElementById('ipfs-modal');
+    const body = document.getElementById('ipfs-modal-body');
+    const deployBtn = document.getElementById('ipfs-deploy-btn');
+    if (!modal || !body) return;
+
+    body.innerHTML = `
+        <div class="edit-field" style="margin-bottom:12px;">
+            <label>Pinata JWT API Key</label>
+            <input type="password" id="pinata-jwt" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…" autocomplete="off">
+        </div>
+        <div style="font-size:0.75em;opacity:0.55;margin-bottom:8px;">Get a free key at <a href="https://pinata.cloud" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">pinata.cloud</a></div>
+        <div id="ipfs-status" class="crypto-status"></div>
+    `;
+    modal.style.display = 'flex';
+
+    deployBtn.onclick = () => _runIPFSDeploy();
+    document.getElementById('ipfs-modal-close').onclick = () => { modal.style.display = 'none'; };
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+}
+
+async function _runIPFSDeploy() {
+    const jwt = document.getElementById('pinata-jwt')?.value?.trim();
+    const status = document.getElementById('ipfs-status');
+    const deployBtn = document.getElementById('ipfs-deploy-btn');
+    const setStatus = (msg) => { if (status) status.textContent = msg; };
+
+    if (!jwt) { setStatus('Please enter your Pinata JWT.'); return; }
+
+    deployBtn.disabled = true;
+    setStatus('Building website…');
+
+    try {
+        const html = await _buildDeployHTML();
+        const blob = new Blob([html], { type: 'text/html' });
+        const formData = new FormData();
+        formData.append('file', blob, 'index.html');
+        formData.append('pinataMetadata', JSON.stringify({ name: `geocities-${_currentProfileEnsName || 'site'}` }));
+
+        setStatus('Uploading to IPFS…');
+        const resp = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${jwt}` },
+            body: formData
+        });
+
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`Pinata error ${resp.status}: ${err}`);
+        }
+
+        const data = await resp.json();
+        const cid = data.IpfsHash;
+        setStatus(`Uploaded! CID: ${cid}`);
+
+        if (_connectedWallet && _currentProfileEnsName && !_currentProfileEnsName.endsWith('.base.eth')) {
+            const connectLink = `https://app.ens.domains/${_currentProfileEnsName}`;
+            status.innerHTML += `<br><a href="${connectLink}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">Set contenthash on ENS ↗</a> or <button id="ipfs-set-contenthash-btn" class="dropdown-button" style="font-size:0.8em;padding:4px 10px;margin-top:6px;">Set via Wallet</button>`;
+            document.getElementById('ipfs-set-contenthash-btn')?.addEventListener('click', async () => {
+                try {
+                    setStatus('Setting contenthash on ENS…');
+                    const txHash = await _setContenthash(cid);
+                    setStatus(`Done! Tx: ${txHash.slice(0,10)}…`);
+                } catch (e) { setStatus(`Error: ${e.message || e}`); }
+            });
+        }
+    } catch (e) {
+        setStatus(`Error: ${e.message || e}`);
+    } finally {
+        deployBtn.disabled = false;
+    }
+}
+
+async function _buildDeployHTML() {
+    const resp = await fetch('download-template.html');
+    if (!resp.ok) throw new Error('Could not load template');
+    let html = await resp.text();
+
+    const bgColor = document.getElementById('bg-color')?.value || '#000000';
+    const textColor = document.getElementById('text-color')?.value || '#00ff00';
+    const borderColor = document.getElementById('border-color')?.value || '#00ff00';
+    const effect = document.getElementById('effect-select')?.value || 'none';
+
+    html = html.replace(/\{\{BG_COLOR\}\}/g, bgColor)
+               .replace(/\{\{TEXT_COLOR\}\}/g, textColor)
+               .replace(/\{\{BORDER_COLOR\}\}/g, borderColor)
+               .replace(/\{\{EFFECT\}\}/g, effect)
+               .replace(/\{\{ENS_NAME\}\}/g, _currentProfileEnsName || '')
+               .replace(/\{\{ADDRESS\}\}/g, _currentProfileAddress || '');
+
+    if (_currentProfileData) {
+        const d = _currentProfileData;
+        html = html.replace(/\{\{AVATAR\}\}/g, d.avatar || '')
+                   .replace(/\{\{DISPLAY_NAME\}\}/g, d.displayName || _currentProfileEnsName || '')
+                   .replace(/\{\{BIO\}\}/g, d.description || '');
+    }
+    return html;
+}
+
+async function _setContenthash(cid) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const signer = await _getSigner();
+    const ensNode = ethers.utils.namehash(_currentProfileEnsName);
+    const contenthash = _cidToContenthash(cid);
+    const resolver = new ethers.Contract(ENS_PUBLIC_RESOLVER, [
+        'function setContenthash(bytes32,bytes)'
+    ], signer);
+    const tx = await resolver.setContenthash(ensNode, contenthash);
+    await tx.wait();
+    return tx.hash;
 }
 
 // Initialize PWA support when the page loads

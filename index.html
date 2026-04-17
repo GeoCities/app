@@ -9,7 +9,7 @@
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' https://fonts.gstatic.com;
         img-src 'self' data: https: http:;
-        connect-src 'self' https://api.web3.bio https://api.ethfollow.xyz https://raw.githubusercontent.com https://cloudflare-eth.com;
+        connect-src 'self' https://api.web3.bio https://api.ethfollow.xyz https://raw.githubusercontent.com https://cloudflare-eth.com https://api.pinata.cloud https://apiv5.paraswap.io;
         object-src 'none';
         base-uri 'self';
         form-action 'none';
@@ -68,10 +68,67 @@
                 <!-- Action buttons (Follow | Crypto | Edit) populated by displayProfile() -->
             </div>
             <div class="profile-crypto-panel">
-                <div class="crypto-qr-container"></div>
-                <div class="crypto-wallet-address"></div>
-                <button class="crypto-copy-btn dropdown-button">Copy Address</button>
-                <a class="crypto-explorer-btn dropdown-button" href="#" target="_blank" rel="noopener noreferrer">Etherscan</a>
+                <div class="crypto-tabs">
+                    <button class="crypto-tab active" data-tab="receive">Receive</button>
+                    <button class="crypto-tab" data-tab="send">Send</button>
+                    <button class="crypto-tab" data-tab="swap">Swap</button>
+                </div>
+                <div class="crypto-tab-body active" id="crypto-receive-body">
+                    <div class="crypto-qr-container"></div>
+                    <div class="crypto-wallet-address"></div>
+                    <button class="crypto-copy-btn dropdown-button">Copy Address</button>
+                    <a class="crypto-explorer-btn dropdown-button" href="#" target="_blank" rel="noopener noreferrer">Etherscan</a>
+                </div>
+                <div class="crypto-tab-body" id="crypto-send-body">
+                    <div class="edit-field">
+                        <label>To (address or ENS name)</label>
+                        <input type="text" id="send-to" placeholder="0x… or name.eth" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div class="send-row">
+                        <div class="edit-field" style="flex:1;">
+                            <label>Amount</label>
+                            <input type="number" id="send-amount" placeholder="0.0" min="0" step="any">
+                        </div>
+                        <div class="edit-field narrow">
+                            <label>Token</label>
+                            <select id="send-token" class="edit-field-select">
+                                <option>ETH</option><option>USDC</option><option>USDT</option><option>DAI</option><option>ENS</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button id="send-submit-btn" class="dropdown-button">Send</button>
+                    <div id="send-status" class="crypto-status"></div>
+                </div>
+                <div class="crypto-tab-body" id="crypto-swap-body">
+                    <div class="send-row">
+                        <div class="edit-field" style="flex:1;">
+                            <label>From</label>
+                            <select id="swap-from" class="edit-field-select">
+                                <option>ETH</option><option>USDC</option><option>USDT</option><option>DAI</option><option>WETH</option><option>ENS</option>
+                            </select>
+                        </div>
+                        <div class="edit-field" style="flex:1;">
+                            <label>Amount</label>
+                            <input type="number" id="swap-amount" placeholder="0.0" min="0" step="any">
+                        </div>
+                    </div>
+                    <div class="swap-arrow">↓</div>
+                    <div class="send-row">
+                        <div class="edit-field" style="flex:1;">
+                            <label>To</label>
+                            <select id="swap-to" class="edit-field-select">
+                                <option>USDC</option><option>ETH</option><option>USDT</option><option>DAI</option><option>WETH</option><option>ENS</option>
+                            </select>
+                        </div>
+                        <div class="edit-field" style="flex:1;">
+                            <label>Est. receive</label>
+                            <div id="swap-estimate" class="swap-estimate-val">—</div>
+                        </div>
+                    </div>
+                    <button id="swap-quote-btn" class="dropdown-button">Get Quote</button>
+                    <button id="swap-exec-btn" class="dropdown-button" style="display:none;">Swap</button>
+                    <div id="swap-status" class="crypto-status"></div>
+                </div>
             </div>
             <div class="profile-records">
                 <!-- ENS records will be inserted here -->
@@ -126,8 +183,37 @@
         </div>
     </div>
 
+    <!-- IPFS Deploy modal -->
+    <div id="ipfs-modal" class="wallet-modal-overlay" role="dialog" aria-modal="true">
+        <div class="wallet-modal-card">
+            <div class="wallet-modal-header">
+                <span>Deploy to IPFS</span>
+                <button id="ipfs-modal-close" class="wallet-modal-close">&#x2715;</button>
+            </div>
+            <div id="ipfs-modal-body" class="edit-modal-body"></div>
+            <div class="edit-modal-footer">
+                <button id="ipfs-deploy-btn" class="dropdown-button edit-modal-save-btn">Upload &amp; Deploy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ENS Register modal -->
+    <div id="register-modal" class="wallet-modal-overlay" role="dialog" aria-modal="true">
+        <div class="wallet-modal-card">
+            <div class="wallet-modal-header">
+                <span id="register-modal-title">Register ENS Name</span>
+                <button id="register-modal-close" class="wallet-modal-close">&#x2715;</button>
+            </div>
+            <div id="register-modal-body" class="edit-modal-body"></div>
+            <div class="edit-modal-footer">
+                <button id="register-submit-btn" class="dropdown-button edit-modal-save-btn" style="display:none;">Register</button>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
