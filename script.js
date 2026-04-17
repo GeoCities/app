@@ -1883,9 +1883,12 @@ function displayProfile(data, ensName) {
         console.warn('coin-dropdown-content not found when trying to set address data.');
     }
     
-    // Clear existing records
+    // Clear existing records and reset display state
     if (profileRecords) profileRecords.innerHTML = '';
-    if (numberRecords) numberRecords.innerHTML = '';
+    if (numberRecords) {
+        numberRecords.innerHTML = '';
+        numberRecords.style.display = 'none';
+    }
     
     // Update avatar
     if (data.avatar) {
@@ -2024,36 +2027,32 @@ function displayProfile(data, ensName) {
         addProfileRecord('Created', formattedDate);
     }
 
-    // Extract and display number records
-    if (data.records) {
+    // Extract and display number records.
+    // The web3.bio API may return text records flat in data.records OR
+    // nested under data.records.texts — check both.
+    const rawRecords = data.records;
+    const textRecords =
+        rawRecords && typeof rawRecords === 'object' && !Array.isArray(rawRecords)
+            ? (rawRecords.texts && typeof rawRecords.texts === 'object' && !Array.isArray(rawRecords.texts)
+                ? rawRecords.texts
+                : rawRecords)
+            : null;
+
+    if (textRecords) {
         const numberRecordsData = [];
-        
-        // Find all records with numeric keys
-        Object.entries(data.records).forEach(([key, value]) => {
-            // Check if the key is a number (or a string containing only digits)
-            if (/^\d+$/.test(key)) {
-                numberRecordsData.push({
-                    key: parseInt(key, 10),
-                    value
-                });
+
+        Object.entries(textRecords).forEach(([key, value]) => {
+            if (/^\d+$/.test(key) && value != null && value !== '') {
+                numberRecordsData.push({ key: parseInt(key, 10), value: String(value) });
             }
         });
-        
-        // Sort number records in reverse order (highest to lowest)
+
+        // Sort newest-first (highest key = most recent post)
         numberRecordsData.sort((a, b) => b.key - a.key);
-        
-        // Display number records if any exist
-        if (numberRecordsData.length > 0) {
-            numberRecordsData.forEach(record => {
-                addNumberRecord(record.key.toString(), record.value);
-            });
-        } else {
-            // Hide the number records container if no number records exist
-            if (numberRecords) numberRecords.style.display = 'none';
-        }
-    } else {
-        // Hide the number records container if no records data exists
-        if (numberRecords) numberRecords.style.display = 'none';
+
+        numberRecordsData.forEach(record => {
+            addNumberRecord(record.key.toString(), record.value);
+        });
     }
     
     // Show download, deploy, and connect buttons
