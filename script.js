@@ -2070,7 +2070,11 @@ function displayProfile(data, ensName) {
         numberRecords.innerHTML = '';
         numberRecords.style.display = 'none';
     }
-    
+    const _profileCard = document.querySelector('.profile-card');
+    if (_profileCard) { _profileCard.innerHTML = ''; _profileCard.style.display = 'none'; }
+    const _profileActions = document.querySelector('.profile-actions');
+    if (_profileActions) { _profileActions.innerHTML = ''; _profileActions.style.display = 'none'; }
+
     // Update avatar
     if (data.avatar) {
         setAvatar(data.avatar);
@@ -2078,14 +2082,63 @@ function displayProfile(data, ensName) {
         const firstLetter = ensName.charAt(0);
         const defaultAvatar = createDefaultAvatar(firstLetter);
         setAvatar(defaultAvatar, firstLetter);
-        
+
         // Store the letter for later regeneration if colors change
         const navLogo = document.getElementById('nav-logo-img');
         if (navLogo) {
             navLogo.dataset.originalLetter = firstLetter;
         }
     }
-    
+
+    // Populate profile card (avatar + display name)
+    const profileCardEl = document.querySelector('.profile-card');
+    if (profileCardEl) {
+        const navLogoSrc = document.getElementById('nav-logo-img').src;
+        const showDisplay = data.displayName && data.displayName !== ensName;
+        profileCardEl.innerHTML = `
+            <img class="profile-card-avatar" src="${navLogoSrc}" alt="${ensName}">
+            <div class="profile-card-info">
+                <div class="profile-card-name">${showDisplay ? data.displayName : ensName}</div>
+                ${showDisplay ? `<div class="profile-card-ens">${ensName}</div>` : ''}
+            </div>`;
+        profileCardEl.style.display = 'flex';
+    }
+
+    // Populate action bar (Follow | Send | Edit)
+    const profileActionsEl = document.querySelector('.profile-actions');
+    if (profileActionsEl) {
+        const isBase2 = ensName.endsWith('.base.eth');
+        const editLink = isBase2
+            ? `https://www.base.org/name/${ensName.replace('.base.eth', '')}`
+            : `https://app.ens.domains/${ensName}`;
+        profileActionsEl.innerHTML = `
+            <div class="profile-actions-row">
+                <a href="https://efp.app/${ensName}" target="_blank" rel="noopener noreferrer" class="profile-action-btn">Follow</a>
+                <button class="profile-action-btn" id="profile-send-btn">Send</button>
+                <a href="${editLink}" target="_blank" rel="noopener noreferrer" class="profile-action-btn">Edit Records</a>
+            </div>`;
+        profileActionsEl.style.display = 'block';
+        const sendBtn = document.getElementById('profile-send-btn');
+        if (sendBtn) {
+            sendBtn.addEventListener('click', () => {
+                const coinContent = document.getElementById('coin-dropdown-content');
+                const addr = coinContent ? coinContent.dataset.address : null;
+                if (addr && navigator.clipboard) {
+                    navigator.clipboard.writeText(addr).then(() => {
+                        sendBtn.textContent = 'Copied!';
+                        setTimeout(() => { sendBtn.textContent = 'Send'; }, 1500);
+                    }).catch(() => {
+                        const cb = document.getElementById('coin-dropdown-btn');
+                        if (cb) cb.click();
+                    });
+                } else {
+                    const cb = document.getElementById('coin-dropdown-btn');
+                    if (cb) cb.click();
+                }
+            });
+        }
+    }
+
     // Update header image if exists
     if (headerImage) {
         if (data.header) {
@@ -2231,6 +2284,14 @@ function displayProfile(data, ensName) {
         // Sort newest-first (highest key = most recent post)
         numberRecordsData.sort((a, b) => b.key - a.key);
 
+        if (numberRecordsData.length > 0) {
+            numberRecords.style.display = 'block';
+            const postsHdr = document.createElement('div');
+            postsHdr.className = 'posts-section-header';
+            postsHdr.textContent = 'Posts';
+            numberRecords.appendChild(postsHdr);
+        }
+
         numberRecordsData.forEach(record => {
             addNumberRecord(record.key.toString(), record.value);
         });
@@ -2340,16 +2401,10 @@ function updateNavBar(name, isRegistered) {
         settingsContainerDiv.id = 'settings-dropdown-btn-container';
         settingsContainerDiv.className = 'dropdown';
         settingsContainerDiv.innerHTML = `
-            <button id="settings-dropdown-btn" class="dropdown-btn">🏗️</button>
+            <button id="settings-dropdown-btn" class="dropdown-btn">Build</button>
             <div id="settings-dropdown-content" class="dropdown-content">
                 <div class="dropdown-section">
-                    <h4>EFP</h4>
-                    <div class="dropdown-buttons">
-                        <a href="https://efp.app/${name}" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
-                    </div>
-                </div>
-                <div class="dropdown-section">
-                    <h4>Design</h4>
+                    <h4><span class="step-num">1</span> Design</h4>
                     <div class="dropdown-controls-col">
                         <label class="control-button bg-control">
                             <input type="color" id="nav-bg-color" class="color-picker" title="Background">
@@ -2378,17 +2433,11 @@ function updateNavBar(name, isRegistered) {
                     </div>
                 </div>
                 <div class="dropdown-section">
-                    <h4>Website</h4>
+                    <h4><span class="step-num">2</span> Publish</h4>
                     <div class="dropdown-buttons">
                         <a href="#" class="dropdown-button download-website-button" id="nav-download-website">Download</a>
-                        <a href="https://pinata.cloud/" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy</a>
-                        <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect</a>
-                    </div>
-                </div>
-                <div class="dropdown-section">
-                    <h4>${profileTypeLabel}</h4>
-                    <div class="dropdown-buttons">
-                        <a href="${editRecordsLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
+                        <a href="https://pinata.cloud/" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy to IPFS</a>
+                        <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect to ENS</a>
                     </div>
                 </div>
             </div>
@@ -2401,7 +2450,7 @@ function updateNavBar(name, isRegistered) {
         coinContainerDiv.id = 'coin-dropdown-btn-container';
         coinContainerDiv.className = 'dropdown';
         coinContainerDiv.innerHTML = `
-            <button id="coin-dropdown-btn" class="dropdown-btn">🪙</button>
+            <button id="coin-dropdown-btn" class="dropdown-btn">Wallet</button>
             <div id="coin-dropdown-content" class="dropdown-content">
                 <h4>Send Crypto</h4>
                 <div id="coin-qr-code-container" style="margin:10px auto; width:150px; height:150px; display:none;"></div>
@@ -2441,7 +2490,13 @@ function displayUnregisteredProfile(ensName) {
         numberRecords.innerHTML = '';
         numberRecords.style.display = 'none';
     }
-    
+
+    // Hide profile card and action bar for unregistered profiles
+    const profileCardUnreg = document.querySelector('.profile-card');
+    if (profileCardUnreg) { profileCardUnreg.style.display = 'none'; profileCardUnreg.innerHTML = ''; }
+    const profileActionsUnreg = document.querySelector('.profile-actions');
+    if (profileActionsUnreg) { profileActionsUnreg.style.display = 'none'; profileActionsUnreg.innerHTML = ''; }
+
     // Reset to default theme colors based on current theme
     resetToDefaultThemeColors();
     

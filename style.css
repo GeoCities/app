@@ -1122,6 +1122,120 @@ h1#homepage-geocities {
     object-fit: contain;
 }
 
+/* Profile card: avatar + name at top of profile */
+.profile-card {
+    display: none;
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    border: 1px solid var(--border-color);
+    border-bottom: none;
+    box-sizing: border-box;
+    background-color: var(--background-color);
+}
+
+.profile-card-avatar {
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0;
+    object-fit: contain;
+    border: 1px solid var(--border-color);
+}
+
+.profile-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-card-name {
+    font-size: 1.05em;
+    font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.profile-card-ens {
+    font-size: 0.8em;
+    opacity: 0.55;
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Profile action bar: Follow | Send | Edit */
+.profile-actions {
+    display: none;
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-top: none;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.profile-actions-row {
+    display: flex;
+    width: 100%;
+}
+
+.profile-action-btn {
+    flex: 1;
+    padding: 10px 6px;
+    background: var(--background-color);
+    color: var(--primary-color);
+    border: none;
+    border-right: 1px solid var(--border-color);
+    cursor: pointer;
+    font-size: 0.82em;
+    text-align: center;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.2s;
+    box-sizing: border-box;
+    font-family: inherit;
+    white-space: nowrap;
+}
+
+.profile-action-btn:last-child {
+    border-right: none;
+}
+
+.profile-action-btn:hover {
+    opacity: 0.65;
+}
+
+/* Posts section header */
+.posts-section-header {
+    padding: 8px 15px;
+    font-size: 0.7em;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border-color);
+    box-sizing: border-box;
+    opacity: 0.5;
+}
+
+/* Step numbers in Build dropdown */
+.step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 0.7em;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    margin-right: 5px;
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
 .ens-grid-container {
     width: var(--container-width, 90%);
     max-width: var(--max-width, 1200px);
