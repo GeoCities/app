@@ -221,6 +221,86 @@ async function fetchENSNumericTextRecords(ensName) {
     }
 }
 
+// Fetch a complete ENS profile from on-chain data (Ethereum mainnet, .eth names only).
+// Returns a data object shaped to match what displayProfile expects, or null if unregistered.
+async function fetchProfileOnChain(ensName) {
+    try {
+        const nhBytes = _ensNamehash(ensName);
+        const nhHex = _toHex(nhBytes);
+
+        const resolverResult = await _ethCall(
+            '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e',
+            '0x0178b8bf' + nhHex
+        );
+        if (!resolverResult || resolverResult.length < 66) return null;
+        const resolver = '0x' + resolverResult.slice(-40);
+        if (/^0x0+$/.test(resolver)) return null;
+
+        const KEYS = [
+            'name', 'display', 'description', 'url', 'email', 'avatar', 'header',
+            'location', 'status', 'com.twitter', 'com.github', 'com.discord',
+            'com.telegram', 'org.telegram', 'social.farcaster',
+            ...Array.from({ length: 20 }, (_, i) => String(i))
+        ];
+
+        const [addrRaw, ...textRaw] = await Promise.all([
+            _ethCall(resolver, '0x3b3b57de' + nhHex).catch(() => null),
+            ...KEYS.map(key =>
+                _ethCall(resolver, _encodeTextCall(nhHex, key))
+                    .then(r => _decodeAbiString(r))
+                    .catch(() => '')
+            )
+        ]);
+
+        let address = null;
+        if (addrRaw && addrRaw.length >= 66) {
+            const a = '0x' + addrRaw.slice(-40);
+            if (!/^0x0+$/.test(a)) address = a;
+        }
+
+        const t = {};
+        KEYS.forEach((key, i) => { if (textRaw[i]) t[key] = textRaw[i]; });
+
+        // Resolve avatar: support https:// and ipfs://; skip NFT references
+        let avatar = t['avatar'] || null;
+        if (avatar) {
+            if (avatar.startsWith('ipfs://')) {
+                avatar = 'https://ipfs.io/ipfs/' + avatar.slice(7);
+            } else if (!avatar.startsWith('https://') && !avatar.startsWith('http://')) {
+                avatar = null;
+            }
+        }
+
+        // Build links structure compatible with displayProfile expectations
+        const links = {};
+        if (t['url']) links.website = { handle: t['url'], link: t['url'] };
+        if (t['com.twitter']) links.twitter = { handle: t['com.twitter'], link: `https://x.com/${t['com.twitter']}` };
+        if (t['com.github']) links.github = { handle: t['com.github'], link: `https://github.com/${t['com.github']}` };
+        if (t['com.discord']) links.discord = { handle: t['com.discord'], link: null };
+        const tgHandle = t['com.telegram'] || t['org.telegram'];
+        if (tgHandle) links.telegram = { handle: tgHandle, link: `https://t.me/${tgHandle}` };
+        if (t['social.farcaster']) links.farcaster = { handle: t['social.farcaster'], link: null };
+
+        return {
+            identity: ensName,
+            platform: 'ens',
+            address,
+            displayName: t['display'] || t['name'] || ensName,
+            avatar,
+            header: t['header'] || null,
+            description: t['description'] || null,
+            email: t['email'] || null,
+            location: t['location'] || null,
+            status: t['status'] || null,
+            links: Object.keys(links).length ? links : null,
+            records: t,
+        };
+    } catch (e) {
+        console.warn('On-chain profile fetch failed:', e);
+        return null;
+    }
+}
+
 // Get DOM elements
 const bgColorPicker = document.getElementById('bg-color');
 const textColorPicker = document.getElementById('text-color');
@@ -1928,82 +2008,54 @@ async function fetchProfile(query) {
 
         const ensName = (query.endsWith('.eth') || query.endsWith('.base.eth')) ? query : `${query}.eth`;
         
-        // Determine the correct API endpoint for web3.bio
-        let url = `${API_BASE_URL}/profile/ens/${ensName}`;
-        if (ensName.endsWith('.base.eth')) {
-            url = `${API_BASE_URL}/profile/basenames/${ensName}`;
-        }
-
-        // Also determine the ethfollow.xyz API endpoint
         const ethFollowUrl = `https://api.ethfollow.xyz/api/v1/users/${ensName}/stats`;
-        
+
         try {
-            // Start on-chain ENS numeric records fetch in parallel with web3.bio
-            const ensRecordsPromise = fetchENSNumericTextRecords(ensName);
-
-            // Fetch profile data from web3.bio
-            const profileResponse = await fetch(url);
-            
-            // Initialize ethfollow data with default values
+            // Fetch ethfollow social counts in parallel with profile data
             let ethFollowData = { followers_count: '0', following_count: '0' };
-            
-            // Try to fetch ethfollow data (but don't fail if this API is unavailable)
-            try {
-                const ethFollowResponse = await fetch(ethFollowUrl);
-                if (ethFollowResponse.ok) {
-                    ethFollowData = await ethFollowResponse.json();
-                    console.log('Ethfollow data fetched successfully:', ethFollowData);
+            const ethFollowPromise = fetch(ethFollowUrl)
+                .then(r => r.ok ? r.json() : ethFollowData)
+                .catch(() => ethFollowData);
+
+            let profileData;
+
+            if (ensName.endsWith('.base.eth')) {
+                // Basenames live on Base L2 — use web3.bio and supplement numeric records on-chain
+                const [profileResponse, ensNumericRecords] = await Promise.all([
+                    fetch(`${API_BASE_URL}/profile/basenames/${ensName}`),
+                    fetchENSNumericTextRecords(ensName)
+                ]);
+                if (profileResponse.ok) {
+                    const raw = await profileResponse.json();
+                    const base = raw.records && raw.records.texts ? raw.records.texts : (raw.records || {});
+                    profileData = { ...raw, records: Object.assign({}, base, ensNumericRecords) };
+                } else if (profileResponse.status === 404) {
+                    displayUnregisteredProfile(ensName);
+                    return;
                 } else {
-                    console.warn('Ethfollow API returned non-OK response:', ethFollowResponse.status);
+                    let errorText = `Error ${profileResponse.status}: ${profileResponse.statusText}`;
+                    try { const d = await profileResponse.json(); errorText = d?.message || d?.error || errorText; } catch (e) {}
+                    throw new Error(errorText);
                 }
-            } catch (ethFollowError) {
-                console.warn('Could not fetch ethfollow data:', ethFollowError);
-                // Continue with default values if ethfollow API fails
-            }
-            
-            if (profileResponse.ok) {
-                const profileData = await profileResponse.json();
-                
-                // Merge the ethfollow data with the profile data
-                // Log the ethfollow data for debugging
-                console.log('Raw ethfollow data:', JSON.stringify(ethFollowData));
-                
-                const ensNumericRecords = await ensRecordsPromise;
-                let mergedRecords;
-                if (profileData.records && profileData.records.texts) {
-                    mergedRecords = { ...profileData.records, texts: Object.assign({}, profileData.records.texts, ensNumericRecords) };
-                } else {
-                    mergedRecords = Object.assign({}, profileData.records || {}, ensNumericRecords);
-                }
-
-                const mergedData = {
-                    ...profileData,
-                    records: mergedRecords,
-                    ethFollow: {
-                        followers: ethFollowData.followers_count || '0',
-                        following: ethFollowData.following_count || '0'
-                    }
-                };
-
-                // Log the merged data for debugging
-                console.log('Merged data ethFollow:', JSON.stringify(mergedData.ethFollow));
-
-                displayProfile(mergedData, ensName);
-            } else if (profileResponse.status === 404) {
-                displayUnregisteredProfile(ensName);
             } else {
-                let errorText = `Error: ${profileResponse.statusText}`;
-                try {
-                    const errorData = await profileResponse.json();
-                    errorText = errorData?.message || errorData?.error || `Error ${profileResponse.status}: ${profileResponse.statusText}`;
-                    if (errorText.toLowerCase().includes("invalid name")) {
-                        errorText = `Invalid name format: ${ensName}`;
-                    } else if (profileResponse.status >= 500) {
-                        errorText = "Server error. Please try again later.";
-                    }
-                } catch (e) {}
-                throw new Error(errorText);
+                // For .eth names: fetch everything directly on-chain via Cloudflare
+                profileData = await fetchProfileOnChain(ensName);
+                if (!profileData) {
+                    displayUnregisteredProfile(ensName);
+                    return;
+                }
             }
+
+            ethFollowData = await ethFollowPromise;
+            const mergedData = {
+                ...profileData,
+                ethFollow: {
+                    followers: ethFollowData.followers_count || '0',
+                    following: ethFollowData.following_count || '0'
+                }
+            };
+            console.log('Merged data ethFollow:', JSON.stringify(mergedData.ethFollow));
+            displayProfile(mergedData, ensName);
         } catch (error) {
             if (error.message.includes('Profile not found')) {
                 displayUnregisteredProfile(ensName);
