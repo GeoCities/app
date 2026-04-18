@@ -1574,6 +1574,14 @@ h1#homepage-geocities {
     width: 100%;
 }
 
+.crypto-disclosure {
+    font-size: 0.68em;
+    text-align: center;
+    opacity: 0.45;
+    padding-top: 6px;
+    width: 100%;
+}
+
 /* Register modal */
 .register-availability {
     font-size: 0.85em;

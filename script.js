@@ -62,6 +62,13 @@ const TOKENS = {
     ENS:  { symbol: 'ENS',  address: '0xC18360217D8F7Ab5e7c516566761Ea12Ce7F9D72', decimals: 18 },
 };
 const PARASWAP_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+// ParaSwap Partner Program revenue share. `partner` identifies GeoCities in the
+// dashboard; `partnerFeeBps` + `partnerAddress` split the spread to treasury.
+// Set PARASWAP_PARTNER_ADDRESS once enrolled — until then the fee is zero and
+// the partner string is informational only.
+const PARASWAP_PARTNER = 'geocities';
+const PARASWAP_PARTNER_FEE_BPS = 50; // 0.5%
+const PARASWAP_PARTNER_ADDRESS = ''; // fill in after partner enrollment
 let _lastSwapQuote = null;
 
 // EIP-6963 multi-wallet discovery — collected at startup
@@ -81,7 +88,16 @@ let gridObserver = null;
 let _currentProfileAddress = null;
 let _currentProfileEnsName = null;
 let _currentProfileData = null;
+// _connectedWallet: null when disconnected, else { address, provider, info }.
+// `provider` is the exact EIP-1193 provider the user picked in the modal —
+// critical when multiple wallets inject into window.ethereum.
 let _connectedWallet = null;
+
+// Return the EIP-1193 provider to route requests through. Prefers the user's
+// chosen provider; falls back to window.ethereum for pre-connect reads.
+function _getWalletProvider() {
+    return _connectedWallet?.provider || window.ethereum || null;
+}
 
 // ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
 
@@ -2119,6 +2135,7 @@ function displayProfile(data, ensName) {
         profileActionsEl.innerHTML = `
             <div class="profile-actions-row">
                 <button class="profile-action-btn" id="profile-follow-btn">Follow</button>
+                <button class="profile-action-btn" id="profile-tip-btn">Tip</button>
                 <button class="profile-action-btn" id="profile-crypto-btn">Crypto</button>
                 <button class="profile-action-btn" id="profile-edit-btn">Edit Records</button>
             </div>`;
@@ -2131,6 +2148,25 @@ function displayProfile(data, ensName) {
             const isOpen = panel.classList.toggle('open');
             document.getElementById('profile-crypto-btn').classList.toggle('active', isOpen);
             if (isOpen) populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
+        });
+
+        // Tip: open Crypto panel pre-switched to Send, prefill recipient.
+        document.getElementById('profile-tip-btn')?.addEventListener('click', () => {
+            if (!_connectedWallet) { openWalletModal(); return; }
+            if (!_currentProfileAddress) return;
+            const panel = document.querySelector('.profile-crypto-panel');
+            if (panel && !panel.classList.contains('open')) {
+                panel.classList.add('open');
+                document.getElementById('profile-crypto-btn')?.classList.add('active');
+                populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
+            }
+            panel?.querySelectorAll('.crypto-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'send'));
+            panel?.querySelectorAll('.crypto-tab-body').forEach(b => b.classList.toggle('active', b.id === 'crypto-send-body'));
+            const toInput = document.getElementById('send-to');
+            const amountInput = document.getElementById('send-amount');
+            if (toInput) toInput.value = _currentProfileEnsName || _currentProfileAddress;
+            if (amountInput && !amountInput.value) amountInput.value = '0.01';
+            amountInput?.focus();
         });
 
         // Follow: on-chain via EFP when wallet connected, else open efp.app
@@ -2370,8 +2406,9 @@ async function _efpFollow(targetAddress, targetEnsName) {
     setFollowBtn('Following…', true);
 
     try {
+        if (!_connectedWallet) throw new Error('No wallet connected');
         // 1. Get connected user's primary list from EFP API
-        const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet}/primary-list`);
+        const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet.address}/primary-list`);
         if (!listResp.ok) throw new Error('no primary list');
         const listData = await listResp.json();
 
@@ -2405,9 +2442,9 @@ async function _efpFollow(targetAddress, targetEnsName) {
         const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
         const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
 
-        await window.ethereum.request({
+        await _getWalletProvider().request({
             method: 'eth_sendTransaction',
-            params: [{ from: _connectedWallet, to: listContract, data: calldata }]
+            params: [{ from: _connectedWallet.address, to: listContract, data: calldata }]
         });
 
         setFollowBtn('Following!', false);
@@ -2543,9 +2580,10 @@ function updateWalletUI() {
     const btn = document.getElementById('wallet-connect-btn');
     if (!btn) return;
     if (_connectedWallet) {
-        btn.textContent = `${_connectedWallet.slice(0, 6)}...${_connectedWallet.slice(-4)}`;
+        const addr = _connectedWallet.address;
+        btn.textContent = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
         const addrEl = document.getElementById('wallet-connected-address');
-        if (addrEl) addrEl.textContent = `${_connectedWallet.slice(0, 10)}...${_connectedWallet.slice(-6)}`;
+        if (addrEl) addrEl.textContent = `${addr.slice(0, 10)}...${addr.slice(-6)}`;
         const dropContent = document.getElementById('wallet-connect-content');
         if (dropContent) dropContent.style.display = '';
     } else {
@@ -2598,11 +2636,15 @@ function openWalletModal() {
         list.appendChild(btn);
     };
 
-    const connectWith = async (provider) => {
+    const connectWith = async (provider, info) => {
         closeWalletModal();
         try {
             const accounts = await provider.request({ method: 'eth_requestAccounts' });
-            if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
+            if (accounts.length) {
+                _connectedWallet = { address: accounts[0], provider, info: info || null };
+                _attachProviderListeners(provider);
+                updateWalletUI();
+            }
         } catch (e) { console.warn('Wallet connect rejected:', e); }
     };
 
@@ -2611,7 +2653,7 @@ function openWalletModal() {
         const iconHtml = info.icon
             ? `<img src="${info.icon}" alt="${info.name}" style="width:100%;height:100%;object-fit:contain;">`
             : '🌐';
-        makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider));
+        makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider, info));
     }
 
     // 2. Legacy window.ethereum (for wallets that don't announce via EIP-6963)
@@ -2621,7 +2663,7 @@ function openWalletModal() {
             const def = knownWallets.find(w => w.test(p));
             const icon = def ? def.icon : '🌐';
             const name = def ? def.name : 'Browser Wallet';
-            makeRow(icon, name, 'Detected', 'Connect', () => connectWith(p));
+            makeRow(icon, name, 'Detected', 'Connect', () => connectWith(p, def ? { name: def.name, rdns: def.rdns } : null));
         }
     }
 
@@ -2667,8 +2709,6 @@ function closeWalletModal() {
     document.getElementById('wallet-modal')?.classList.remove('open');
 }
 
-let _walletListenerAdded = false;
-
 // Wire up the wallet connect button interactions
 function initWalletConnect() {
     updateWalletUI();
@@ -2689,6 +2729,7 @@ function initWalletConnect() {
     const disconnectBtn = document.getElementById('wallet-disconnect-btn');
     if (disconnectBtn) {
         disconnectBtn.addEventListener('click', () => {
+            _detachProviderListeners(_connectedWallet?.provider);
             _connectedWallet = null;
             updateWalletUI();
             document.getElementById('wallet-connect-content')?.classList.remove('show');
@@ -2702,14 +2743,31 @@ function initWalletConnect() {
         document.getElementById('wallet-modal-close')?.addEventListener('click', closeWalletModal);
         modal.addEventListener('click', e => { if (e.target === modal) closeWalletModal(); });
     }
+}
 
-    if (!_walletListenerAdded && window.ethereum) {
-        _walletListenerAdded = true;
-        window.ethereum.on('accountsChanged', accounts => {
-            _connectedWallet = accounts.length ? accounts[0] : null;
-            updateWalletUI();
-        });
-    }
+// accountsChanged / chainChanged are attached to the *chosen* provider so the
+// UI only reacts to the wallet the user actually connected.
+const _providerListeners = new WeakMap();
+function _attachProviderListeners(provider) {
+    if (!provider || _providerListeners.has(provider)) return;
+    const onAccounts = accounts => {
+        if (!_connectedWallet || _connectedWallet.provider !== provider) return;
+        if (accounts.length) _connectedWallet.address = accounts[0];
+        else _connectedWallet = null;
+        updateWalletUI();
+    };
+    const onChain = () => updateWalletUI();
+    provider.on?.('accountsChanged', onAccounts);
+    provider.on?.('chainChanged', onChain);
+    _providerListeners.set(provider, { onAccounts, onChain });
+}
+function _detachProviderListeners(provider) {
+    if (!provider) return;
+    const refs = _providerListeners.get(provider);
+    if (!refs) return;
+    provider.removeListener?.('accountsChanged', refs.onAccounts);
+    provider.removeListener?.('chainChanged', refs.onChain);
+    _providerListeners.delete(provider);
 }
 
 // ===== ABI helpers for ENS setText =====
@@ -2803,9 +2861,9 @@ async function _saveRecords(originalFields) {
         for (let i = 0; i < changes.length; i++) {
             if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
             const { key, value } = changes[i];
-            await window.ethereum.request({
+            await _getWalletProvider().request({
                 method: 'eth_sendTransaction',
-                params: [{ from: _connectedWallet, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
+                params: [{ from: _connectedWallet.address, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
             });
         }
         if (saveBtn) saveBtn.textContent = 'Saved!';
@@ -4157,7 +4215,9 @@ function initializeCyclingWords() {
 // ─── ethers.js helpers ───────────────────────────────────────────────────────
 
 function _getProvider() {
-    return new ethers.providers.Web3Provider(window.ethereum);
+    const eip1193 = _getWalletProvider();
+    if (!eip1193) throw new Error('No wallet connected');
+    return new ethers.providers.Web3Provider(eip1193);
 }
 
 function _getReadProvider() {
@@ -4182,7 +4242,7 @@ async function resolveRecipient(input) {
 // ─── Send crypto ─────────────────────────────────────────────────────────────
 
 async function sendToken(toInput, amount, tokenSymbol) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const to = await resolveRecipient(toInput);
     const token = TOKENS[tokenSymbol];
@@ -4215,7 +4275,7 @@ function _paraswapAddr(sym) {
 }
 
 async function getSwapQuote(fromSym, toSym, amount) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
     const provider = _getProvider();
     const accounts = await provider.listAccounts();
     if (!accounts.length) throw new Error('Connect wallet first');
@@ -4227,7 +4287,10 @@ async function getSwapQuote(fromSym, toSym, amount) {
     const destDecimals = TOKENS[toSym]?.decimals || 18;
     const srcAmount = ethers.utils.parseUnits(amount, srcDecimals).toString();
 
-    const url = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${srcAmount}&srcDecimals=${srcDecimals}&destDecimals=${destDecimals}&side=SELL&network=1&userAddress=${userAddr}`;
+    const partnerParams = PARASWAP_PARTNER_ADDRESS
+        ? `&partner=${PARASWAP_PARTNER}&partnerAddress=${PARASWAP_PARTNER_ADDRESS}&partnerFeeBps=${PARASWAP_PARTNER_FEE_BPS}&takeSurplus=true`
+        : `&partner=${PARASWAP_PARTNER}`;
+    const url = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${srcAmount}&srcDecimals=${srcDecimals}&destDecimals=${destDecimals}&side=SELL&network=1&userAddress=${userAddr}${partnerParams}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`ParaSwap error: ${resp.status}`);
     const data = await resp.json();
@@ -4238,19 +4301,26 @@ async function getSwapQuote(fromSym, toSym, amount) {
 }
 
 async function executeSwap(quote) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const userAddr = quote.userAddr;
 
+    const txBody = {
+        srcToken: quote.srcToken, destToken: quote.destToken,
+        srcAmount: quote.srcAmount, destAmount: quote.priceRoute.destAmount,
+        priceRoute: quote.priceRoute, userAddress: userAddr,
+        slippage: 100, srcDecimals: quote.srcDecimals, destDecimals: quote.destDecimals,
+        partner: PARASWAP_PARTNER
+    };
+    if (PARASWAP_PARTNER_ADDRESS) {
+        txBody.partnerAddress = PARASWAP_PARTNER_ADDRESS;
+        txBody.partnerFeeBps = PARASWAP_PARTNER_FEE_BPS;
+        txBody.takeSurplus = true;
+    }
     const txResp = await fetch(`https://apiv5.paraswap.io/transactions/1?ignoreChecks=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            srcToken: quote.srcToken, destToken: quote.destToken,
-            srcAmount: quote.srcAmount, destAmount: quote.priceRoute.destAmount,
-            priceRoute: quote.priceRoute, userAddress: userAddr,
-            slippage: 100, srcDecimals: quote.srcDecimals, destDecimals: quote.destDecimals
-        })
+        body: JSON.stringify(txBody)
     });
     if (!txResp.ok) throw new Error(`ParaSwap tx error: ${txResp.status}`);
     const txData = await txResp.json();
@@ -4331,7 +4401,7 @@ async function openRegisterModal(ensName) {
 }
 
 async function _executeRegistration(label, ensName, priceWei) {
-    if (!window.ethereum) { alert('Connect your wallet first.'); return; }
+    if (!_connectedWallet) { openWalletModal(); return; }
     const submitBtn = document.getElementById('register-submit-btn');
     const status = document.getElementById('reg-status');
     const setStatus = (msg) => { if (status) status.textContent = msg; };
@@ -4497,7 +4567,7 @@ async function _buildDeployHTML() {
 }
 
 async function _setContenthash(cid) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const ensNode = ethers.utils.namehash(_currentProfileEnsName);
     const contenthash = _cidToContenthash(cid);
