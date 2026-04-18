@@ -99,6 +99,115 @@ function _getWalletProvider() {
     return _connectedWallet?.provider || window.ethereum || null;
 }
 
+// Prompt the wallet to switch networks before running a mainnet-only action
+// (ENS registrar, ParaSwap, EFP, resolver writes). Throws if the user rejects
+// so the caller can surface a clear inline error.
+async function _ensureChain(chainIdHex = '0x1') {
+    const provider = _getWalletProvider();
+    if (!provider) throw new Error('No wallet connected');
+    const current = await provider.request({ method: 'eth_chainId' });
+    if (current === chainIdHex) return;
+    try {
+        await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
+    } catch (err) {
+        // 4902: chain not added to the wallet yet. Only mainnet is required
+        // today, which every wallet ships with — so surface a real error.
+        if (err?.code === 4902) throw new Error('Add Ethereum mainnet to your wallet and try again.');
+        throw err;
+    }
+}
+
+// Turn raw wallet/RPC errors into strings a human would write. Unknown errors
+// fall back to a generic line — the raw message still goes to console.error.
+function _formatTxError(err) {
+    if (!err) return 'Something went wrong.';
+    const code = err.code ?? err.error?.code;
+    const msg = (err.shortMessage || err.reason || err.error?.message || err.message || String(err)).toLowerCase();
+    if (code === 4001 || code === 'ACTION_REJECTED' || msg.includes('user rejected') || msg.includes('user denied')) {
+        return 'You cancelled the transaction.';
+    }
+    if (code === 4902 || msg.includes('unrecognized chain')) return 'This network isn\u2019t in your wallet yet — approve the prompt to add it.';
+    if (msg.includes('insufficient funds')) return 'Not enough ETH to cover gas + amount.';
+    if (msg.includes('insufficient allowance')) return 'Token approval missing — try again to approve first.';
+    if (msg.includes('nonce too low') || msg.includes('replacement') || msg.includes('underpriced')) {
+        return 'A pending tx is still confirming — wait a moment and retry.';
+    }
+    if (msg.includes('network') && msg.includes('error')) return 'Network hiccup — try again.';
+    if (msg.includes('missing revert data') || msg.includes('cannot estimate gas')) return 'Transaction would fail — double-check the amount and try again.';
+    if (msg.includes('nameunavailable') || msg.includes('already registered')) return 'That name is already registered.';
+    if (msg.includes('commitmenttoonew') || msg.includes('commitment too new')) return 'Wait a few more seconds before registering.';
+    if (msg.includes('commitmenttooold') || msg.includes('commitment too old')) return 'Commitment expired — start the registration over.';
+    const fallback = err.shortMessage || err.reason || err.message;
+    return fallback ? String(fallback).slice(0, 140) : 'Something went wrong.';
+}
+
+// ─── Transaction toast stack ────────────────────────────────────────────────
+// Global, per-tx visual feedback that survives modal close. Each tx-initiating
+// action opens a toast, updates it on receipt, and auto-dismisses on success.
+const _txToast = (() => {
+    let stack = null;
+    let seq = 0;
+    const ensureStack = () => {
+        if (stack) return stack;
+        stack = document.getElementById('tx-toast-stack');
+        if (!stack) {
+            stack = document.createElement('div');
+            stack.id = 'tx-toast-stack';
+            document.body.appendChild(stack);
+        }
+        return stack;
+    };
+    const explorerUrl = (hash) => `https://etherscan.io/tx/${hash}`;
+    const add = ({ title = 'Transaction', sub = 'Waiting for wallet…' } = {}) => {
+        const root = ensureStack();
+        const el = document.createElement('div');
+        el.className = 'tx-toast';
+        el.innerHTML = `
+            <button class="tx-toast-close" aria-label="Dismiss">\u00d7</button>
+            <div class="tx-toast-title"></div>
+            <div class="tx-toast-sub"></div>`;
+        const titleEl = el.querySelector('.tx-toast-title');
+        const subEl = el.querySelector('.tx-toast-sub');
+        titleEl.textContent = title;
+        subEl.textContent = sub;
+        el.querySelector('.tx-toast-close').addEventListener('click', () => dismiss());
+        root.appendChild(el);
+        requestAnimationFrame(() => el.classList.add('show'));
+        const id = ++seq;
+        let autoDismiss = null;
+        const clearAuto = () => { if (autoDismiss) { clearTimeout(autoDismiss); autoDismiss = null; } };
+        const dismiss = () => {
+            clearAuto();
+            el.classList.remove('show');
+            setTimeout(() => el.remove(), 200);
+        };
+        const update = (patch = {}) => {
+            if (patch.title) titleEl.textContent = patch.title;
+            if (patch.sub !== undefined) {
+                if (patch.txHash) {
+                    const short = `${patch.txHash.slice(0,10)}\u2026`;
+                    subEl.innerHTML = `${_escapeHtmlText(patch.sub)} <a href="${explorerUrl(patch.txHash)}" target="_blank" rel="noopener noreferrer">${short}</a>`;
+                } else {
+                    subEl.textContent = patch.sub;
+                }
+            } else if (patch.txHash) {
+                const short = `${patch.txHash.slice(0,10)}\u2026`;
+                subEl.innerHTML = `<a href="${explorerUrl(patch.txHash)}" target="_blank" rel="noopener noreferrer">${short}</a>`;
+            }
+            if (patch.kind === 'error') { el.classList.remove('tx-success'); el.classList.add('tx-error'); }
+            else if (patch.kind === 'success') { el.classList.remove('tx-error'); el.classList.add('tx-success'); }
+            if (patch.autoDismissMs) {
+                clearAuto();
+                autoDismiss = setTimeout(dismiss, patch.autoDismissMs);
+            }
+        };
+        return { id, update, dismiss };
+    };
+    return { add };
+})();
+
+function _escapeHtmlText(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
 // ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
 
 function _keccak256(data) {
@@ -2407,6 +2516,7 @@ async function _efpFollow(targetAddress, targetEnsName) {
 
     try {
         if (!_connectedWallet) throw new Error('No wallet connected');
+        await _ensureChain('0x1');
         // 1. Get connected user's primary list from EFP API
         const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet.address}/primary-list`);
         if (!listResp.ok) throw new Error('no primary list');
@@ -2442,10 +2552,17 @@ async function _efpFollow(targetAddress, targetEnsName) {
         const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
         const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
 
-        await _getWalletProvider().request({
-            method: 'eth_sendTransaction',
-            params: [{ from: _connectedWallet.address, to: listContract, data: calldata }]
-        });
+        const toast = _txToast.add({ title: `Follow ${targetEnsName || targetAddress}`, sub: 'Confirm in wallet\u2026' });
+        try {
+            const txHash = await _getWalletProvider().request({
+                method: 'eth_sendTransaction',
+                params: [{ from: _connectedWallet.address, to: listContract, data: calldata }]
+            });
+            toast.update({ kind: 'success', sub: 'Submitted', txHash, autoDismissMs: 10000 });
+        } catch (txErr) {
+            toast.update({ kind: 'error', sub: _formatTxError(txErr), autoDismissMs: 8000 });
+            throw txErr;
+        }
 
         setFollowBtn('Following!', false);
         setTimeout(() => setFollowBtn('Follow', false), 3000);
@@ -2522,11 +2639,16 @@ function populateCryptoPanel(address, ensName) {
             if (!toInput || !amount) { if (sendStatus) sendStatus.textContent = 'Please fill in all fields.'; return; }
             sendBtn.disabled = true;
             if (sendStatus) sendStatus.textContent = 'Sending…';
+            const toast = _txToast.add({ title: `Send ${amount} ${token}`, sub: 'Confirm in wallet…' });
             try {
                 const txHash = await sendToken(toInput, amount, token);
                 if (sendStatus) sendStatus.textContent = `Sent! Tx: ${txHash.slice(0,10)}…`;
+                toast.update({ kind: 'success', sub: 'Confirmed', txHash, autoDismissMs: 10000 });
             } catch (e) {
-                if (sendStatus) sendStatus.textContent = `Error: ${e.message || e}`;
+                console.error('Send failed:', e);
+                const friendly = _formatTxError(e);
+                if (sendStatus) sendStatus.textContent = friendly;
+                toast.update({ kind: 'error', sub: friendly, autoDismissMs: 8000 });
             } finally { sendBtn.disabled = false; }
         };
     }
@@ -2551,7 +2673,7 @@ function populateCryptoPanel(address, ensName) {
                 if (swapStatus) swapStatus.textContent = '';
                 if (execBtn) execBtn.style.display = 'block';
             } catch (e) {
-                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                if (swapStatus) swapStatus.textContent = _formatTxError(e);
                 _lastSwapQuote = null;
                 if (execBtn) execBtn.style.display = 'none';
             } finally { quoteBtn.disabled = false; }
@@ -2562,13 +2684,18 @@ function populateCryptoPanel(address, ensName) {
             if (!_lastSwapQuote) return;
             execBtn.disabled = true;
             if (swapStatus) swapStatus.textContent = 'Swapping…';
+            const q = _lastSwapQuote;
+            const toast = _txToast.add({ title: `Swap ${q.fromSym} \u2192 ${q.toSym}`, sub: 'Confirm in wallet\u2026' });
             try {
                 const txHash = await executeSwap(_lastSwapQuote);
                 if (swapStatus) swapStatus.textContent = `Swapped! Tx: ${txHash.slice(0,10)}…`;
                 if (execBtn) execBtn.style.display = 'none';
                 _lastSwapQuote = null;
+                toast.update({ kind: 'success', sub: 'Confirmed', txHash, autoDismissMs: 10000 });
             } catch (e) {
-                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                const friendly = _formatTxError(e);
+                if (swapStatus) swapStatus.textContent = friendly;
+                toast.update({ kind: 'error', sub: friendly, autoDismissMs: 8000 });
                 execBtn.disabled = false;
             }
         };
@@ -2851,6 +2978,7 @@ async function _saveRecords(originalFields) {
     }
 
     try {
+        await _ensureChain('0x1');
         const nhBytes = _ensNamehash(ensName);
         const nhHex = _toHex(nhBytes);
         const resolverResult = await _ethCall('0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e', '0x0178b8bf' + nhHex);
@@ -2858,13 +2986,22 @@ async function _saveRecords(originalFields) {
         const resolver = '0x' + resolverResult.slice(-40);
         if (/^0x0+$/.test(resolver)) throw new Error('Zero resolver');
 
-        for (let i = 0; i < changes.length; i++) {
-            if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
-            const { key, value } = changes[i];
-            await _getWalletProvider().request({
-                method: 'eth_sendTransaction',
-                params: [{ from: _connectedWallet.address, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
-            });
+        const toast = _txToast.add({ title: `Update ${ensName} records`, sub: `${changes.length} record${changes.length === 1 ? '' : 's'} to set` });
+        try {
+            for (let i = 0; i < changes.length; i++) {
+                if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
+                const { key, value } = changes[i];
+                toast.update({ sub: `Confirm ${key} (${i + 1}/${changes.length})…` });
+                const txHash = await _getWalletProvider().request({
+                    method: 'eth_sendTransaction',
+                    params: [{ from: _connectedWallet.address, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
+                });
+                toast.update({ sub: `Sent ${key} (${i + 1}/${changes.length})`, txHash });
+            }
+            toast.update({ kind: 'success', sub: 'All records updated', autoDismissMs: 10000 });
+        } catch (txErr) {
+            toast.update({ kind: 'error', sub: _formatTxError(txErr), autoDismissMs: 8000 });
+            throw txErr;
         }
         if (saveBtn) saveBtn.textContent = 'Saved!';
         setTimeout(() => {
@@ -2873,7 +3010,17 @@ async function _saveRecords(originalFields) {
         }, 2000);
     } catch (e) {
         console.error('Save records failed:', e);
-        if (saveBtn) { saveBtn.textContent = 'Error — retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 3000); }
+        if (saveBtn) { saveBtn.textContent = 'Retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 4000); }
+        const body = document.getElementById('edit-modal-body');
+        if (body) {
+            let errEl = body.querySelector('.edit-modal-error');
+            if (!errEl) {
+                errEl = document.createElement('div');
+                errEl.className = 'edit-modal-error crypto-status';
+                body.appendChild(errEl);
+            }
+            errEl.textContent = _formatTxError(e);
+        }
     }
 }
 
@@ -3070,17 +3217,54 @@ function displayUnregisteredProfile(ensName) {
     const registerButton = document.createElement('button');
     registerButton.className = 'register-button dropdown-button';
 
+    registerContainer.innerHTML = '';
+
     if (isBasename) {
         const basenameWithoutSuffix = ensName.replace('.base.eth', '');
         registerButton.textContent = 'Register Basename';
         registerButton.onclick = () => window.open(`https://www.base.org/names?claim=${basenameWithoutSuffix}`, '_blank', 'noopener,noreferrer');
+        registerContainer.appendChild(registerButton);
     } else {
-        registerButton.textContent = 'Register ENS';
-        registerButton.onclick = () => openRegisterModal(ensName);
-    }
+        const label = ensName.replace(/\.eth$/, '');
+        const availabilityEl = document.createElement('div');
+        availabilityEl.className = 'register-availability-inline';
+        availabilityEl.textContent = 'Checking availability…';
+        registerContainer.appendChild(availabilityEl);
 
-    registerContainer.innerHTML = '';
-    registerContainer.appendChild(registerButton);
+        registerButton.textContent = 'Register ENS';
+        registerButton.disabled = true;
+        registerButton.onclick = () => openRegisterModal(ensName);
+        registerContainer.appendChild(registerButton);
+
+        (async () => {
+            try {
+                if (label.length < 3) {
+                    availabilityEl.textContent = 'Names must be at least 3 characters.';
+                    availabilityEl.classList.add('unavailable');
+                    return;
+                }
+                const provider = _getReadProvider();
+                const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, provider);
+                const available = await registrar.available(label);
+                if (!available) {
+                    availabilityEl.textContent = `${ensName} is already registered.`;
+                    availabilityEl.classList.add('unavailable');
+                    return;
+                }
+                const YEAR_SECS = 365 * 24 * 3600;
+                const price = await registrar.rentPrice(label, YEAR_SECS);
+                const totalWei = price.base.add(price.premium);
+                const totalEth = parseFloat(ethers.utils.formatEther(totalWei)).toFixed(4);
+                availabilityEl.innerHTML = `<span class="avail-dot">✓</span> <strong>${ensName}</strong> is available · ~${totalEth} ETH / year`;
+                availabilityEl.classList.add('available');
+                registerButton.disabled = false;
+            } catch (e) {
+                console.error('Availability check failed:', e);
+                availabilityEl.textContent = 'Could not check availability. Try registering below.';
+                registerButton.disabled = false;
+            }
+        })();
+    }
     
     // Hide download, deploy, and connect buttons
     const downloadContainer = document.querySelector('.download-website-container');
@@ -4276,6 +4460,7 @@ function _paraswapAddr(sym) {
 
 async function getSwapQuote(fromSym, toSym, amount) {
     if (!_connectedWallet) throw new Error('No wallet connected');
+    await _ensureChain('0x1');
     const provider = _getProvider();
     const accounts = await provider.listAccounts();
     if (!accounts.length) throw new Error('Connect wallet first');
@@ -4302,6 +4487,7 @@ async function getSwapQuote(fromSym, toSym, amount) {
 
 async function executeSwap(quote) {
     if (!_connectedWallet) throw new Error('No wallet connected');
+    await _ensureChain('0x1');
     const signer = await _getSigner();
     const userAddr = quote.userAddr;
 
@@ -4393,7 +4579,8 @@ async function openRegisterModal(ensName) {
         submitBtn.textContent = 'Register';
         submitBtn.onclick = () => _executeRegistration(label, ensName, totalWei);
     } catch (e) {
-        body.innerHTML = `<div class="register-availability">Error: ${e.message || e}</div>`;
+        console.error('Register availability check failed:', e);
+        body.innerHTML = `<div class="register-availability">${_formatTxError(e)}</div>`;
     }
 
     document.getElementById('register-modal-close').onclick = () => { modal.style.display = 'none'; };
@@ -4407,7 +4594,9 @@ async function _executeRegistration(label, ensName, priceWei) {
     const setStatus = (msg) => { if (status) status.textContent = msg; };
 
     submitBtn.disabled = true;
+    const toast = _txToast.add({ title: `Register ${ensName}`, sub: 'Confirm commit\u2026' });
     try {
+        await _ensureChain('0x1');
         const signer = await _getSigner();
         const userAddr = await signer.getAddress();
         const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, signer);
@@ -4419,26 +4608,34 @@ async function _executeRegistration(label, ensName, priceWei) {
         setStatus('Sending commit transaction…');
         document.getElementById('reg-dot1').classList.add('done');
         const commitTx = await registrar.commit(commitment);
+        toast.update({ sub: 'Commit sent — waiting for confirmation', txHash: commitTx.hash });
         await commitTx.wait();
 
         document.getElementById('reg-step2').classList.remove('dim');
         setStatus('Waiting 60 seconds before registration…');
+        toast.update({ sub: 'Commit confirmed — waiting 60s (anti-frontrun delay)' });
         await new Promise(r => setTimeout(r, 62000));
 
         document.getElementById('reg-dot2').classList.add('done');
         document.getElementById('reg-step3').classList.remove('dim');
         setStatus('Sending register transaction…');
+        toast.update({ sub: 'Confirm register in wallet…' });
 
         // Add 10% buffer on price
         const value = priceWei.mul(110).div(100);
         const registerTx = await registrar.register(label, userAddr, YEAR_SECS, secret, ENS_PUBLIC_RESOLVER, [], false, 0, { value });
+        toast.update({ sub: 'Register sent — waiting for confirmation', txHash: registerTx.hash });
         await registerTx.wait();
 
         document.getElementById('reg-dot3').classList.add('done');
         setStatus(`${ensName} registered! Tx: ${registerTx.hash.slice(0,10)}…`);
+        toast.update({ kind: 'success', sub: `${ensName} is yours!`, txHash: registerTx.hash, autoDismissMs: 15000 });
         submitBtn.style.display = 'none';
     } catch (e) {
-        setStatus(`Error: ${e.message || e}`);
+        console.error('Register failed:', e);
+        const friendly = _formatTxError(e);
+        setStatus(friendly);
+        toast.update({ kind: 'error', sub: friendly, autoDismissMs: 10000 });
         submitBtn.disabled = false;
     }
 }
@@ -4526,15 +4723,23 @@ async function _runIPFSDeploy() {
             const connectLink = `https://app.ens.domains/${_currentProfileEnsName}`;
             status.innerHTML += `<br><a href="${connectLink}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">Set contenthash on ENS ↗</a> or <button id="ipfs-set-contenthash-btn" class="dropdown-button" style="font-size:0.8em;padding:4px 10px;margin-top:6px;">Set via Wallet</button>`;
             document.getElementById('ipfs-set-contenthash-btn')?.addEventListener('click', async () => {
+                const toast = _txToast.add({ title: `Set contenthash for ${_currentProfileEnsName}`, sub: 'Confirm in wallet\u2026' });
                 try {
                     setStatus('Setting contenthash on ENS…');
                     const txHash = await _setContenthash(cid);
                     setStatus(`Done! Tx: ${txHash.slice(0,10)}…`);
-                } catch (e) { setStatus(`Error: ${e.message || e}`); }
+                    toast.update({ kind: 'success', sub: 'Site live on your ENS name', txHash, autoDismissMs: 12000 });
+                } catch (e) {
+                    console.error('Set contenthash failed:', e);
+                    const friendly = _formatTxError(e);
+                    setStatus(friendly);
+                    toast.update({ kind: 'error', sub: friendly, autoDismissMs: 8000 });
+                }
             });
         }
     } catch (e) {
-        setStatus(`Error: ${e.message || e}`);
+        console.error('IPFS deploy failed:', e);
+        setStatus(_formatTxError(e));
     } finally {
         deployBtn.disabled = false;
     }
@@ -4568,6 +4773,7 @@ async function _buildDeployHTML() {
 
 async function _setContenthash(cid) {
     if (!_connectedWallet) throw new Error('No wallet connected');
+    await _ensureChain('0x1');
     const signer = await _getSigner();
     const ensNode = ethers.utils.namehash(_currentProfileEnsName);
     const contenthash = _cidToContenthash(cid);
