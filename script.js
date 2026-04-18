@@ -48,9 +48,209 @@ const OTHER_ENS_NAMES = [
 // Combined array for backward compatibility
 const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 
-// Grid cleanup tracking — prevents listener/observer accumulation on re-init
+// ENS on-chain contract addresses
+const ENS_REGISTRAR = '0x253553366Da8546fC250F225fe3d25d0C782303b';
+const ENS_PUBLIC_RESOLVER = '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63';
+
+// Token definitions (symbol → address + decimals)
+const TOKENS = {
+    ETH:  { symbol: 'ETH',  address: null,                                           decimals: 18 },
+    USDC: { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6  },
+    USDT: { symbol: 'USDT', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6  },
+    DAI:  { symbol: 'DAI',  address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', decimals: 18 },
+    WETH: { symbol: 'WETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', decimals: 18 },
+    ENS:  { symbol: 'ENS',  address: '0xC18360217D8F7Ab5e7c516566761Ea12Ce7F9D72', decimals: 18 },
+};
+const PARASWAP_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+let _lastSwapQuote = null;
+
+// EIP-6963 multi-wallet discovery — collected at startup
+const _eip6963Providers = [];
+window.addEventListener('eip6963:announceProvider', (event) => {
+    if (!_eip6963Providers.find(p => p.info.uuid === event.detail.info.uuid)) {
+        _eip6963Providers.push(event.detail);
+    }
+});
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+
 let gridResizeHandler = null;
 let gridObserver = null;
+
+// Profile state
+let _currentProfileAddress = null;
+let _currentProfileEnsName = null;
+let _currentProfileData = null;
+let _connectedWallet = null;
+
+// ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
+
+function _keccak256(data) {
+    const RATE = 136;
+    const RCL = new Int32Array([
+        0x00000001, 0x00008082, 0x0000808a, 0x80008000,
+        0x0000808b, 0x80000001, 0x80008081, 0x00008009,
+        0x0000008a, 0x00000088, 0x80008009, 0x8000000a,
+        0x8000808b, 0x0000008b, 0x00008089, 0x00008003,
+        0x00008002, 0x00000080, 0x0000800a, 0x8000000a,
+        0x80008081, 0x00008080, 0x80000001, 0x80008008
+    ]);
+    const RCH = new Int32Array([
+        0, 0, 0x80000000, 0x80000000,
+        0, 0, 0x80000000, 0x80000000,
+        0, 0, 0, 0,
+        0, 0x80000000, 0x80000000, 0x80000000,
+        0x80000000, 0x80000000, 0, 0x80000000,
+        0x80000000, 0x80000000, 0, 0x80000000
+    ]);
+    const ROT = [0,1,62,28,27,36,44,6,55,20,3,10,43,25,39,41,45,15,21,8,18,2,61,56,14];
+    const sl = new Int32Array(25), sh = new Int32Array(25);
+
+    function rot(lo, hi, n) {
+        if (n === 0) return [lo, hi];
+        if (n < 32) return [(lo << n) | (hi >>> (32 - n)), (hi << n) | (lo >>> (32 - n))];
+        if (n === 32) return [hi, lo];
+        n -= 32;
+        return [(hi << n) | (lo >>> (32 - n)), (lo << n) | (hi >>> (32 - n))];
+    }
+
+    function f() {
+        const cl = new Int32Array(5), ch = new Int32Array(5);
+        const bl = new Int32Array(25), bh = new Int32Array(25);
+        for (let r = 0; r < 24; r++) {
+            for (let x = 0; x < 5; x++) {
+                cl[x] = sl[x] ^ sl[x+5] ^ sl[x+10] ^ sl[x+15] ^ sl[x+20];
+                ch[x] = sh[x] ^ sh[x+5] ^ sh[x+10] ^ sh[x+15] ^ sh[x+20];
+            }
+            for (let x = 0; x < 5; x++) {
+                const [rl, rh] = rot(cl[(x+1)%5], ch[(x+1)%5], 1);
+                const dl = cl[(x+4)%5] ^ rl, dh = ch[(x+4)%5] ^ rh;
+                for (let y = 0; y < 5; y++) { sl[x+5*y] ^= dl; sh[x+5*y] ^= dh; }
+            }
+            for (let x = 0; x < 5; x++) {
+                for (let y = 0; y < 5; y++) {
+                    const [rl, rh] = rot(sl[x+5*y], sh[x+5*y], ROT[x+5*y]);
+                    const t = y + 5*((2*x+3*y)%5);
+                    bl[t] = rl; bh[t] = rh;
+                }
+            }
+            for (let x = 0; x < 5; x++) {
+                for (let y = 0; y < 5; y++) {
+                    const i = x+5*y;
+                    sl[i] = bl[i] ^ (~bl[(x+1)%5+5*y] & bl[(x+2)%5+5*y]);
+                    sh[i] = bh[i] ^ (~bh[(x+1)%5+5*y] & bh[(x+2)%5+5*y]);
+                }
+            }
+            sl[0] ^= RCL[r]; sh[0] ^= RCH[r];
+        }
+    }
+
+    const pad = RATE - (data.length % RATE);
+    const msg = new Uint8Array(data.length + pad);
+    msg.set(data);
+    msg[data.length] = 0x01;
+    msg[msg.length - 1] |= 0x80;
+
+    for (let off = 0; off < msg.length; off += RATE) {
+        for (let i = 0; i < 17; i++) {
+            const b = off + i * 8;
+            sl[i] ^= msg[b] | (msg[b+1] << 8) | (msg[b+2] << 16) | (msg[b+3] << 24);
+            sh[i] ^= msg[b+4] | (msg[b+5] << 8) | (msg[b+6] << 16) | (msg[b+7] << 24);
+        }
+        f();
+    }
+
+    const out = new Uint8Array(32);
+    for (let i = 0; i < 4; i++) {
+        const lo = sl[i] >>> 0, hi = sh[i] >>> 0;
+        for (let b = 0; b < 4; b++) out[i*8+b] = (lo >>> (b*8)) & 0xff;
+        for (let b = 0; b < 4; b++) out[i*8+4+b] = (hi >>> (b*8)) & 0xff;
+    }
+    return out;
+}
+
+function _ensNamehash(name) {
+    let node = new Uint8Array(32);
+    if (!name) return node;
+    const labels = name.toLowerCase().split('.');
+    for (let i = labels.length - 1; i >= 0; i--) {
+        const labelHash = _keccak256(new TextEncoder().encode(labels[i]));
+        const combined = new Uint8Array(64);
+        combined.set(node);
+        combined.set(labelHash, 32);
+        node = _keccak256(combined);
+    }
+    return node;
+}
+
+function _toHex(bytes) {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function _encodeTextCall(namehashHex, key) {
+    const keyBytes = new TextEncoder().encode(key);
+    const keyPad = Math.ceil(keyBytes.length / 32) * 32;
+    const out = new Uint8Array(4 + 32 + 32 + 32 + keyPad);
+    out[0] = 0x59; out[1] = 0xd1; out[2] = 0xd4; out[3] = 0x3c;
+    for (let i = 0; i < 32; i++) out[4 + i] = parseInt(namehashHex.slice(i*2, i*2+2), 16);
+    out[4 + 32 + 31] = 64;
+    const kl = keyBytes.length;
+    out[4 + 64 + 29] = (kl >> 16) & 0xff;
+    out[4 + 64 + 30] = (kl >> 8) & 0xff;
+    out[4 + 64 + 31] = kl & 0xff;
+    out.set(keyBytes, 4 + 96);
+    return '0x' + _toHex(out);
+}
+
+async function _ethCall(to, data) {
+    const r = await fetch('https://cloudflare-eth.com', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to, data }, 'latest'], id: 1 })
+    });
+    const j = await r.json();
+    return j.result || null;
+}
+
+function _decodeAbiString(hex) {
+    if (!hex || hex === '0x') return '';
+    const d = hex.startsWith('0x') ? hex.slice(2) : hex;
+    if (d.length < 128) return '';
+    const len = parseInt(d.slice(64, 128), 16);
+    if (!len || len > 10000 || d.length < 128 + len * 2) return '';
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = parseInt(d.slice(128 + i*2, 130 + i*2), 16);
+    return new TextDecoder().decode(bytes);
+}
+
+async function fetchENSNumericTextRecords(ensName) {
+    try {
+        const nhBytes = _ensNamehash(ensName);
+        const nhHex = _toHex(nhBytes);
+        const resolverResult = await _ethCall(
+            '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e',
+            '0x0178b8bf' + nhHex
+        );
+        if (!resolverResult || resolverResult.length < 42) return {};
+        const resolver = '0x' + resolverResult.slice(-40);
+        if (/^0x0+$/.test(resolver)) return {};
+        const calls = Array.from({ length: 20 }, (_, i) => {
+            const key = String(i);
+            return _ethCall(resolver, _encodeTextCall(nhHex, key))
+                .then(r => ({ key, value: _decodeAbiString(r) }))
+                .catch(() => ({ key, value: '' }));
+        });
+        const results = await Promise.all(calls);
+        const records = {};
+        for (const { key, value } of results) {
+            if (value) records[key] = value;
+        }
+        return records;
+    } catch (e) {
+        console.warn('ENS on-chain fetch failed:', e);
+        return {};
+    }
+}
 
 // Get DOM elements
 const bgColorPicker = document.getElementById('bg-color');
@@ -1042,16 +1242,8 @@ async function generateDownload() {
         templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
         templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
 
-        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
-        let profileAddress = '[Address not found]';
-        // data.address is not directly available here. We rely on it being set in the dataset of coin-dropdown-content by displayProfile.
-        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
-            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
-        } else {
-            console.warn("generateDownload: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
-        }
         // The template will fetch its own address. Set a placeholder.
-        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
+        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, _currentProfileAddress || 'Loading address...');
         // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template, so no replacement needed here.
         
         // Add CSS variables for colors
@@ -1214,15 +1406,8 @@ async function downloadUsingXHR() {
                         templateHtml = templateHtml.replace(/FAVICON_SRC_PLACEHOLDER/g, avatarUrl);
                         templateHtml = templateHtml.replace(/AVATAR_SRC_PLACEHOLDER/g, avatarUrl);
                         
-                        const coinDropdownContentEl = document.getElementById('coin-dropdown-content');
-                        let profileAddress = '[Address not found]';
-                        if (coinDropdownContentEl && coinDropdownContentEl.dataset.address) {
-                            profileAddress = coinDropdownContentEl.dataset.address; // This is the address known at download time
-                        } else {
-                             console.warn("downloadUsingXHR: coin-dropdown-content.dataset.address not found. Using default for PROFILE_ETH_ADDRESS_PLACEHOLDER.");
-                        }
                         // The template will fetch its own address. Set a placeholder.
-                        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, 'Loading address...');
+                        templateHtml = templateHtml.replace(/PROFILE_ETH_ADDRESS_PLACEHOLDER/g, _currentProfileAddress || 'Loading address...');
                         // PROFILE_NETWORK_TYPE_PLACEHOLDER was removed from download template.
 
                         // Add CSS variables for colors
@@ -1769,6 +1954,9 @@ async function fetchProfile(query) {
         const ethFollowUrl = `https://api.ethfollow.xyz/api/v1/users/${ensName}/stats`;
         
         try {
+            // Start on-chain ENS numeric records fetch in parallel with web3.bio
+            const ensRecordsPromise = fetchENSNumericTextRecords(ensName);
+
             // Fetch profile data from web3.bio
             const profileResponse = await fetch(url);
             
@@ -1796,17 +1984,26 @@ async function fetchProfile(query) {
                 // Log the ethfollow data for debugging
                 console.log('Raw ethfollow data:', JSON.stringify(ethFollowData));
                 
+                const ensNumericRecords = await ensRecordsPromise;
+                let mergedRecords;
+                if (profileData.records && profileData.records.texts) {
+                    mergedRecords = { ...profileData.records, texts: Object.assign({}, profileData.records.texts, ensNumericRecords) };
+                } else {
+                    mergedRecords = Object.assign({}, profileData.records || {}, ensNumericRecords);
+                }
+
                 const mergedData = {
                     ...profileData,
+                    records: mergedRecords,
                     ethFollow: {
                         followers: ethFollowData.followers_count || '0',
                         following: ethFollowData.following_count || '0'
                     }
                 };
-                
+
                 // Log the merged data for debugging
                 console.log('Merged data ethFollow:', JSON.stringify(mergedData.ethFollow));
-                
+
                 displayProfile(mergedData, ensName);
             } else if (profileResponse.status === 404) {
                 displayUnregisteredProfile(ensName);
@@ -1867,21 +2064,10 @@ function displayProfile(data, ensName) {
     // Add Follow button to nav bar for registered profiles
     updateNavBar(ensName, true);
 
-    // Store address and profile type for coin dropdown, if the dropdown content element exists
-    const coinDropdownContent = document.getElementById('coin-dropdown-content');
-    if (coinDropdownContent) {
-        if (data.address) {
-            coinDropdownContent.dataset.address = data.address;
-            coinDropdownContent.dataset.ensName = ensName;
-            console.log(`Stored address ${data.address} and ensName ${ensName} for coin dropdown.`);
-        } else {
-            delete coinDropdownContent.dataset.address;
-            delete coinDropdownContent.dataset.ensName;
-            console.log('No address found for profile, cleared coin dropdown data.');
-        }
-    } else {
-        console.warn('coin-dropdown-content not found when trying to set address data.');
-    }
+    // Store profile state for crypto panel, downloads, and edit records
+    _currentProfileAddress = data.address || null;
+    _currentProfileEnsName = ensName;
+    _currentProfileData = data;
     
     // Clear existing records and reset display state
     if (profileRecords) profileRecords.innerHTML = '';
@@ -1889,7 +2075,13 @@ function displayProfile(data, ensName) {
         numberRecords.innerHTML = '';
         numberRecords.style.display = 'none';
     }
-    
+    const _profileCard = document.querySelector('.profile-card');
+    if (_profileCard) { _profileCard.innerHTML = ''; _profileCard.style.display = 'none'; }
+    const _profileActions = document.querySelector('.profile-actions');
+    if (_profileActions) { _profileActions.innerHTML = ''; _profileActions.style.display = 'none'; }
+    const _cryptoPanel = document.querySelector('.profile-crypto-panel');
+    if (_cryptoPanel) { _cryptoPanel.classList.remove('open'); }
+
     // Update avatar
     if (data.avatar) {
         setAvatar(data.avatar);
@@ -1897,14 +2089,73 @@ function displayProfile(data, ensName) {
         const firstLetter = ensName.charAt(0);
         const defaultAvatar = createDefaultAvatar(firstLetter);
         setAvatar(defaultAvatar, firstLetter);
-        
+
         // Store the letter for later regeneration if colors change
         const navLogo = document.getElementById('nav-logo-img');
         if (navLogo) {
             navLogo.dataset.originalLetter = firstLetter;
         }
     }
-    
+
+    // Populate profile hero card (avatar + name + bio)
+    const profileCardEl = document.querySelector('.profile-card');
+    if (profileCardEl) {
+        const navLogoSrc = document.getElementById('nav-logo-img').src;
+        const showDisplay = data.displayName && data.displayName !== ensName;
+        const bio = data.description || '';
+        profileCardEl.innerHTML = `
+            <img class="profile-card-avatar" src="${navLogoSrc}" alt="${ensName}">
+            <div class="profile-card-info">
+                <div class="profile-card-name">${showDisplay ? data.displayName : ensName}</div>
+                ${showDisplay ? `<div class="profile-card-ens">${ensName}</div>` : ''}
+                ${bio ? `<div class="profile-card-bio">${bio}</div>` : ''}
+            </div>`;
+        profileCardEl.style.display = 'flex';
+    }
+
+    // Populate action bar (Follow | Crypto | Edit Records)
+    const profileActionsEl = document.querySelector('.profile-actions');
+    if (profileActionsEl) {
+        profileActionsEl.innerHTML = `
+            <div class="profile-actions-row">
+                <button class="profile-action-btn" id="profile-follow-btn">Follow</button>
+                <button class="profile-action-btn" id="profile-crypto-btn">Crypto</button>
+                <button class="profile-action-btn" id="profile-edit-btn">Edit Records</button>
+            </div>`;
+        profileActionsEl.style.display = 'block';
+
+        // Crypto panel toggle
+        document.getElementById('profile-crypto-btn')?.addEventListener('click', () => {
+            const panel = document.querySelector('.profile-crypto-panel');
+            if (!panel) return;
+            const isOpen = panel.classList.toggle('open');
+            document.getElementById('profile-crypto-btn').classList.toggle('active', isOpen);
+            if (isOpen) populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
+        });
+
+        // Follow: on-chain via EFP when wallet connected, else open efp.app
+        document.getElementById('profile-follow-btn')?.addEventListener('click', () => {
+            if (_connectedWallet) {
+                _efpFollow(_currentProfileAddress, _currentProfileEnsName);
+            } else {
+                window.open(`https://efp.app/${ensName}`, '_blank', 'noopener,noreferrer');
+            }
+        });
+
+        // Edit Records: inline modal when wallet connected, else link to ENS app
+        document.getElementById('profile-edit-btn')?.addEventListener('click', () => {
+            if (_connectedWallet) {
+                openEditRecordsModal();
+            } else {
+                const isBase2 = ensName.endsWith('.base.eth');
+                const editLink = isBase2
+                    ? `https://www.base.org/name/${ensName.replace('.base.eth', '')}`
+                    : `https://app.ens.domains/${ensName}`;
+                window.open(editLink, '_blank', 'noopener,noreferrer');
+            }
+        });
+    }
+
     // Update header image if exists
     if (headerImage) {
         if (data.header) {
@@ -1917,16 +2168,9 @@ function displayProfile(data, ensName) {
     }
 
     // Add records in specific order
-    // 1. Identity (ENS/Basename)
     const isBase = ensName.endsWith('.base.eth');
-    addProfileRecord(isBase ? 'Basename' : 'ENS', ensName);
 
-    // 2. Display Name (if different from ENS)
-    if (data.displayName && data.displayName !== ensName) {
-        addProfileRecord('Name', data.displayName);
-    }
-
-    // 3. Followers/Following from ethfollow.xyz API
+    // 1. Followers/Following from ethfollow.xyz API
     console.log('Display profile data:', JSON.stringify(data.ethFollow));
     
     if (data.ethFollow) {
@@ -1949,12 +2193,7 @@ function displayProfile(data, ensName) {
         addProfileRecord('Status', data.status);
     }
 
-    // 6. Bio (Description)
-    if (data.description) {
-        addProfileRecord('Bio', data.description);
-    }
-
-    // 7. Email
+    // 6. Email
     if (data.email) {
         addProfileRecord('Email', data.email);
     }
@@ -2050,6 +2289,14 @@ function displayProfile(data, ensName) {
         // Sort newest-first (highest key = most recent post)
         numberRecordsData.sort((a, b) => b.key - a.key);
 
+        if (numberRecordsData.length > 0) {
+            numberRecords.style.display = 'block';
+            const postsHdr = document.createElement('div');
+            postsHdr.className = 'posts-section-header';
+            postsHdr.textContent = 'Posts';
+            numberRecords.appendChild(postsHdr);
+        }
+
         numberRecordsData.forEach(record => {
             addNumberRecord(record.key.toString(), record.value);
         });
@@ -2109,6 +2356,469 @@ function normalizeUrl(url) {
     return url;
 }
 
+// Populate the inline crypto panel with QR code, address, and explorer link
+// EFP on-chain follow
+// Contracts (Ethereum mainnet):
+//   AccountMetadata: 0x5289fE5daBC021D02FDDf23d4a4DF96F4E0F17EF
+//   ListRegistry:    0x0E688f5DCa4a0a4729946ACbC44C792341714e08
+//   ListRecords:     0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33
+async function _efpFollow(targetAddress, targetEnsName) {
+    const followBtn = document.getElementById('profile-follow-btn');
+    const setFollowBtn = (text, disabled) => {
+        if (followBtn) { followBtn.textContent = text; followBtn.disabled = !!disabled; }
+    };
+    setFollowBtn('Following…', true);
+
+    try {
+        // 1. Get connected user's primary list from EFP API
+        const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet}/primary-list`);
+        if (!listResp.ok) throw new Error('no primary list');
+        const listData = await listResp.json();
+
+        // Extract token ID and storage location info from API response
+        const tokenId = listData.primary_list || listData.token_id || listData.list;
+        if (!tokenId && tokenId !== 0) throw new Error('no primary list token');
+
+        // 2. Get list storage location (chainId, contract, nonce/slot)
+        // Try EFP API first, then fallback to contract call
+        let listContract = '0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33';
+        let slot = BigInt(tokenId);
+
+        const locResp = await fetch(`https://api.ethfollow.xyz/api/v1/lists/${tokenId}/storage-location`).catch(() => null);
+        if (locResp && locResp.ok) {
+            const loc = await locResp.json();
+            const nonce = loc.nonce ?? loc.slot ?? loc.list_storage_location?.nonce;
+            const addr = loc.contract_address ?? loc.list_storage_location?.contract_address;
+            if (nonce !== undefined) slot = BigInt(nonce);
+            if (addr) listContract = addr;
+        }
+
+        // 3. Build the follow list operation bytes
+        // Format: version(1) || opcode=add(1) || record_version(1) || record_type=address(1) || address(20)
+        const addrHex = (targetAddress || '0x0000000000000000000000000000000000000000').replace('0x', '').padStart(40, '0');
+        const opBytes = '01010101' + addrHex; // 24 bytes
+        const opPadded = opBytes.padEnd(64, '0');
+
+        // 4. ABI encode applyListOp(uint256 slot, bytes op) — selector 0x5aaf83db
+        const slotHex = slot.toString(16).padStart(64, '0');
+        const bytesOffset = '0000000000000000000000000000000000000000000000000000000000000040';
+        const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
+        const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
+
+        await window.ethereum.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: _connectedWallet, to: listContract, data: calldata }]
+        });
+
+        setFollowBtn('Following!', false);
+        setTimeout(() => setFollowBtn('Follow', false), 3000);
+    } catch (e) {
+        console.warn('EFP on-chain follow failed, opening efp.app:', e);
+        setFollowBtn('Follow', false);
+        window.open(`https://efp.app/${targetEnsName || targetAddress}`, '_blank', 'noopener,noreferrer');
+    }
+}
+
+function populateCryptoPanel(address, ensName) {
+    const panel = document.querySelector('.profile-crypto-panel');
+    if (!panel) return;
+
+    // Tab switching
+    panel.querySelectorAll('.crypto-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            panel.querySelectorAll('.crypto-tab').forEach(t => t.classList.remove('active'));
+            panel.querySelectorAll('.crypto-tab-body').forEach(b => b.classList.remove('active'));
+            tab.classList.add('active');
+            const body = document.getElementById(`crypto-${tab.dataset.tab}-body`);
+            if (body) body.classList.add('active');
+        });
+    });
+
+    // Receive tab
+    const qrContainer = panel.querySelector('.crypto-qr-container');
+    const addrDiv = panel.querySelector('.crypto-wallet-address');
+    const copyBtn = panel.querySelector('.crypto-copy-btn');
+    const explorerBtn = panel.querySelector('.crypto-explorer-btn');
+
+    if (address) {
+        if (addrDiv) addrDiv.textContent = address;
+        if (qrContainer && typeof QRCode !== 'undefined') {
+            qrContainer.innerHTML = '';
+            try {
+                new QRCode(qrContainer, { text: address, width: 150, height: 150, correctLevel: QRCode.CorrectLevel.M });
+                qrContainer.style.display = 'block';
+            } catch (e) { qrContainer.style.display = 'none'; }
+        }
+        if (explorerBtn) {
+            if (ensName && ensName.endsWith('.base.eth')) {
+                explorerBtn.textContent = 'Basescan';
+                explorerBtn.href = `https://basescan.org/name-lookup-search?id=${ensName}`;
+            } else {
+                explorerBtn.textContent = 'Etherscan';
+                explorerBtn.href = `https://etherscan.io/name-lookup-search?id=${ensName}`;
+            }
+            explorerBtn.style.display = 'flex';
+        }
+        if (copyBtn) {
+            copyBtn.onclick = () => {
+                if (!navigator.clipboard) return;
+                navigator.clipboard.writeText(address).then(() => {
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyBtn.textContent = 'Copy Address'; }, 2000);
+                });
+            };
+        }
+    } else {
+        if (addrDiv) addrDiv.textContent = 'No address found';
+        if (qrContainer) qrContainer.style.display = 'none';
+        if (explorerBtn) explorerBtn.style.display = 'none';
+    }
+
+    // Send tab
+    const sendBtn = document.getElementById('send-submit-btn');
+    const sendStatus = document.getElementById('send-status');
+    if (sendBtn) {
+        sendBtn.onclick = async () => {
+            const toInput = document.getElementById('send-to')?.value?.trim();
+            const amount = document.getElementById('send-amount')?.value?.trim();
+            const token = document.getElementById('send-token')?.value;
+            if (!toInput || !amount) { if (sendStatus) sendStatus.textContent = 'Please fill in all fields.'; return; }
+            sendBtn.disabled = true;
+            if (sendStatus) sendStatus.textContent = 'Sending…';
+            try {
+                const txHash = await sendToken(toInput, amount, token);
+                if (sendStatus) sendStatus.textContent = `Sent! Tx: ${txHash.slice(0,10)}…`;
+            } catch (e) {
+                if (sendStatus) sendStatus.textContent = `Error: ${e.message || e}`;
+            } finally { sendBtn.disabled = false; }
+        };
+    }
+
+    // Swap tab
+    const quoteBtn = document.getElementById('swap-quote-btn');
+    const execBtn = document.getElementById('swap-exec-btn');
+    const swapStatus = document.getElementById('swap-status');
+    if (quoteBtn) {
+        quoteBtn.onclick = async () => {
+            const fromSym = document.getElementById('swap-from')?.value;
+            const toSym = document.getElementById('swap-to')?.value;
+            const amount = document.getElementById('swap-amount')?.value?.trim();
+            if (!amount || fromSym === toSym) { if (swapStatus) swapStatus.textContent = 'Please enter amount and different tokens.'; return; }
+            quoteBtn.disabled = true;
+            if (swapStatus) swapStatus.textContent = 'Getting quote…';
+            try {
+                const quote = await getSwapQuote(fromSym, toSym, amount);
+                _lastSwapQuote = quote;
+                const estEl = document.getElementById('swap-estimate');
+                if (estEl) estEl.textContent = quote.estimate;
+                if (swapStatus) swapStatus.textContent = '';
+                if (execBtn) execBtn.style.display = 'block';
+            } catch (e) {
+                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                _lastSwapQuote = null;
+                if (execBtn) execBtn.style.display = 'none';
+            } finally { quoteBtn.disabled = false; }
+        };
+    }
+    if (execBtn) {
+        execBtn.onclick = async () => {
+            if (!_lastSwapQuote) return;
+            execBtn.disabled = true;
+            if (swapStatus) swapStatus.textContent = 'Swapping…';
+            try {
+                const txHash = await executeSwap(_lastSwapQuote);
+                if (swapStatus) swapStatus.textContent = `Swapped! Tx: ${txHash.slice(0,10)}…`;
+                if (execBtn) execBtn.style.display = 'none';
+                _lastSwapQuote = null;
+            } catch (e) {
+                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                execBtn.disabled = false;
+            }
+        };
+    }
+}
+
+// Update the nav wallet connect button appearance
+function updateWalletUI() {
+    const btn = document.getElementById('wallet-connect-btn');
+    if (!btn) return;
+    if (_connectedWallet) {
+        btn.textContent = `${_connectedWallet.slice(0, 6)}...${_connectedWallet.slice(-4)}`;
+        const addrEl = document.getElementById('wallet-connected-address');
+        if (addrEl) addrEl.textContent = `${_connectedWallet.slice(0, 10)}...${_connectedWallet.slice(-6)}`;
+        const dropContent = document.getElementById('wallet-connect-content');
+        if (dropContent) dropContent.style.display = '';
+    } else {
+        btn.textContent = 'Connect';
+        const dropContent = document.getElementById('wallet-connect-content');
+        if (dropContent) dropContent.style.display = 'none';
+    }
+}
+
+// Open the wallet selection modal — uses EIP-6963, legacy injection, or mobile deep links
+function openWalletModal() {
+    const modal = document.getElementById('wallet-modal');
+    const list = document.getElementById('wallet-modal-list');
+    if (!modal || !list) return;
+
+    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const dappUrl = window.location.href;
+    const dappHost = window.location.hostname + window.location.pathname;
+
+    // Mobile deep links — open dapp inside the wallet's in-app browser
+    const mobileLinks = {
+        'io.metamask':         `https://metamask.app.link/dapp/${dappHost}`,
+        'app.rainbow':         `https://rnbwapp.com/dapp?url=${encodeURIComponent(dappUrl)}`,
+        'xyz.coinbase.wallet': `https://go.cb-wallet.com/dapp?url=${encodeURIComponent(dappUrl)}`,
+        'com.trustwallet.app': `https://link.trustwallet.com/open_url?url=${encodeURIComponent(dappUrl)}`,
+    };
+
+    // Known wallet info for fallback detection / display
+    const knownWallets = [
+        { rdns: 'io.metamask',         name: 'MetaMask',       icon: '🦊', test: p => p.isMetaMask && !p.isCoinbaseWallet, installUrl: 'https://metamask.io/download/' },
+        { rdns: 'xyz.coinbase.wallet', name: 'Coinbase Wallet',icon: '🔵', test: p => p.isCoinbaseWallet,                  installUrl: 'https://www.coinbase.com/wallet/downloads' },
+        { rdns: 'app.rainbow',         name: 'Rainbow',        icon: '🌈', test: p => p.isRainbow,                          installUrl: 'https://rainbow.me/download' },
+        { rdns: 'com.brave.wallet',    name: 'Brave Wallet',   icon: '🦁', test: p => p.isBraveWallet,                     installUrl: 'https://brave.com/wallet/' },
+        { rdns: 'com.trustwallet.app', name: 'Trust Wallet',   icon: '🛡️', test: p => p.isTrust,                           installUrl: 'https://trustwallet.com/download' },
+    ];
+
+    list.innerHTML = '';
+
+    const makeRow = (iconHtml, name, subtext, badge, onClick) => {
+        const btn = document.createElement('button');
+        btn.className = 'wallet-option';
+        btn.innerHTML = `
+            <div class="wallet-option-icon">${iconHtml}</div>
+            <div class="wallet-option-info">
+                <div class="wallet-option-name">${name}</div>
+                <div class="wallet-option-status">${subtext}</div>
+            </div>
+            <span class="wallet-option-badge">${badge}</span>`;
+        btn.addEventListener('click', onClick);
+        list.appendChild(btn);
+    };
+
+    const connectWith = async (provider) => {
+        closeWalletModal();
+        try {
+            const accounts = await provider.request({ method: 'eth_requestAccounts' });
+            if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
+        } catch (e) { console.warn('Wallet connect rejected:', e); }
+    };
+
+    // 1. EIP-6963 providers (desktop extensions) — the most reliable detection
+    for (const { info, provider } of _eip6963Providers) {
+        const iconHtml = info.icon
+            ? `<img src="${info.icon}" alt="${info.name}" style="width:100%;height:100%;object-fit:contain;">`
+            : '🌐';
+        makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider));
+    }
+
+    // 2. Legacy window.ethereum (for wallets that don't announce via EIP-6963)
+    if (_eip6963Providers.length === 0 && window.ethereum) {
+        const legacyProviders = window.ethereum.providers || [window.ethereum];
+        for (const p of legacyProviders) {
+            const def = knownWallets.find(w => w.test(p));
+            const icon = def ? def.icon : '🌐';
+            const name = def ? def.name : 'Browser Wallet';
+            makeRow(icon, name, 'Detected', 'Connect', () => connectWith(p));
+        }
+    }
+
+    // 3. Mobile deep links — when no injected wallets, let user open the dapp inside their wallet app
+    if (_eip6963Providers.length === 0 && !window.ethereum && isMobile) {
+        for (const w of knownWallets) {
+            const deepLink = mobileLinks[w.rdns];
+            if (!deepLink) continue;
+            makeRow(w.icon, w.name, 'Open in app', 'Open', () => {
+                closeWalletModal();
+                window.location.href = deepLink;
+            });
+        }
+        // Explain why we're showing open links
+        const note = document.createElement('p');
+        note.style.cssText = 'font-size:0.72em;opacity:0.5;text-align:center;padding:10px 16px 4px;margin:0;line-height:1.5;';
+        note.textContent = 'Tapping "Open" loads this page inside your wallet\'s browser where you can connect.';
+        list.appendChild(note);
+    }
+
+    // 4. Desktop install options (always shown when wallet not detected on desktop)
+    if (!isMobile) {
+        const eip6963Rdns = new Set(_eip6963Providers.map(p => p.info.rdns));
+        for (const w of knownWallets) {
+            if (!eip6963Rdns.has(w.rdns) && !(window.ethereum && knownWallets.find(k => k.test(window.ethereum)))) {
+                makeRow(w.icon, w.name, 'Not installed', 'Get', () => {
+                    window.open(w.installUrl, '_blank', 'noopener,noreferrer');
+                    closeWalletModal();
+                });
+            }
+        }
+    }
+
+    if (list.children.length === 0) {
+        list.innerHTML = '<p style="padding:16px;text-align:center;opacity:0.5;font-size:0.85em;">No wallets detected.<br>Install a wallet extension to continue.</p>';
+    }
+
+    document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
+    modal.classList.add('open');
+}
+
+function closeWalletModal() {
+    document.getElementById('wallet-modal')?.classList.remove('open');
+}
+
+let _walletListenerAdded = false;
+
+// Wire up the wallet connect button interactions
+function initWalletConnect() {
+    updateWalletUI();
+
+    // Click: open modal if not connected, toggle dropdown if connected
+    const btn = document.getElementById('wallet-connect-btn');
+    if (btn) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (_connectedWallet) {
+                document.getElementById('wallet-connect-content')?.classList.toggle('show');
+            } else {
+                openWalletModal();
+            }
+        });
+    }
+
+    const disconnectBtn = document.getElementById('wallet-disconnect-btn');
+    if (disconnectBtn) {
+        disconnectBtn.addEventListener('click', () => {
+            _connectedWallet = null;
+            updateWalletUI();
+            document.getElementById('wallet-connect-content')?.classList.remove('show');
+        });
+    }
+
+    // Wire wallet modal close handlers (idempotent: modal is in the DOM once)
+    const modal = document.getElementById('wallet-modal');
+    if (modal && !modal.dataset.wired) {
+        modal.dataset.wired = '1';
+        document.getElementById('wallet-modal-close')?.addEventListener('click', closeWalletModal);
+        modal.addEventListener('click', e => { if (e.target === modal) closeWalletModal(); });
+    }
+
+    if (!_walletListenerAdded && window.ethereum) {
+        _walletListenerAdded = true;
+        window.ethereum.on('accountsChanged', accounts => {
+            _connectedWallet = accounts.length ? accounts[0] : null;
+            updateWalletUI();
+        });
+    }
+}
+
+// ===== ABI helpers for ENS setText =====
+function _abiEncodeSetText(namehashHex, key, value) {
+    const encStr = (s) => {
+        const bytes = new TextEncoder().encode(s);
+        const padded = Math.ceil(bytes.length / 32) * 32 || 32;
+        let h = bytes.length.toString(16).padStart(64, '0');
+        for (const b of bytes) h += b.toString(16).padStart(2, '0');
+        return h.padEnd(64 + padded * 2, '0');
+    };
+    const nh = namehashHex.replace('0x', '').padStart(64, '0');
+    const keyEnc = encStr(key);
+    const valueEnc = encStr(value);
+    const keyLen = Math.ceil(new TextEncoder().encode(key).length / 32) * 32 || 32;
+    const keyOff = (96).toString(16).padStart(64, '0');
+    const valOff = (96 + 32 + keyLen).toString(16).padStart(64, '0');
+    return '0x10f13a8c' + nh + keyOff + valOff + keyEnc + valueEnc;
+}
+
+// ===== Edit Records modal =====
+function _escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _escapeAttr(s) { return String(s).replace(/"/g,'&quot;'); }
+
+async function openEditRecordsModal() {
+    const modal = document.getElementById('edit-records-modal');
+    const body = document.getElementById('edit-modal-body');
+    if (!modal || !body) return;
+
+    const p = _currentProfileData || {};
+    const fields = [
+        { key: 'name',         label: 'Display Name', value: p.displayName || '' },
+        { key: 'description',  label: 'Bio',          value: p.description || '', multiline: true },
+        { key: 'location',     label: 'Location',     value: p.location || '' },
+        { key: 'status',       label: 'Status',       value: p.status || '' },
+        { key: 'email',        label: 'Email',        value: p.email || '' },
+        { key: 'url',          label: 'Website',      value: p.links?.website?.handle || '' },
+        { key: 'com.twitter',  label: 'Twitter',      value: p.links?.twitter?.handle || '' },
+        { key: 'com.github',   label: 'GitHub',       value: p.links?.github?.handle || '' },
+        { key: 'com.discord',  label: 'Discord',      value: p.links?.discord?.handle || '' },
+        { key: 'org.telegram', label: 'Telegram',     value: p.links?.telegram?.handle || '' },
+        { key: 'xyz.farcaster',label: 'Farcaster',    value: p.links?.farcaster?.handle || '' },
+        { key: 'avatar',       label: 'Avatar URL',   value: p.avatar || '' },
+    ];
+
+    body.innerHTML = fields.map(f => `
+        <div class="edit-field">
+            <label>${f.label}</label>
+            ${f.multiline
+                ? `<textarea data-key="${f.key}">${_escapeHtml(f.value)}</textarea>`
+                : `<input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}">`}
+        </div>`).join('');
+
+    const saveBtn = document.getElementById('edit-modal-save');
+    if (saveBtn) saveBtn.onclick = () => _saveRecords(fields);
+
+    if (!modal.dataset.wired) {
+        modal.dataset.wired = '1';
+        document.getElementById('edit-modal-close')?.addEventListener('click', () => modal.classList.remove('open'));
+        modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+    }
+    modal.classList.add('open');
+}
+
+async function _saveRecords(originalFields) {
+    if (!_connectedWallet) { openWalletModal(); return; }
+    const body = document.getElementById('edit-modal-body');
+    const saveBtn = document.getElementById('edit-modal-save');
+    const ensName = _currentProfileEnsName;
+
+    const changes = [];
+    for (const f of originalFields) {
+        const el = body.querySelector(`[data-key="${f.key}"]`);
+        if (!el) continue;
+        const newVal = el.value.trim();
+        if (newVal !== f.value) changes.push({ key: f.key, value: newVal });
+    }
+    if (changes.length === 0) {
+        document.getElementById('edit-records-modal')?.classList.remove('open');
+        return;
+    }
+
+    try {
+        const nhBytes = _ensNamehash(ensName);
+        const nhHex = _toHex(nhBytes);
+        const resolverResult = await _ethCall('0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e', '0x0178b8bf' + nhHex);
+        if (!resolverResult || resolverResult.length < 42) throw new Error('No resolver');
+        const resolver = '0x' + resolverResult.slice(-40);
+        if (/^0x0+$/.test(resolver)) throw new Error('Zero resolver');
+
+        for (let i = 0; i < changes.length; i++) {
+            if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
+            const { key, value } = changes[i];
+            await window.ethereum.request({
+                method: 'eth_sendTransaction',
+                params: [{ from: _connectedWallet, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
+            });
+        }
+        if (saveBtn) saveBtn.textContent = 'Saved!';
+        setTimeout(() => {
+            document.getElementById('edit-records-modal')?.classList.remove('open');
+            if (saveBtn) saveBtn.textContent = 'Save Changes';
+        }, 2000);
+    } catch (e) {
+        console.error('Save records failed:', e);
+        if (saveBtn) { saveBtn.textContent = 'Error — retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 3000); }
+    }
+}
+
 // Function to update the navigation bar based on the current view
 function updateNavBar(name, isRegistered) {
     const navBar = document.querySelector('.nav-bar');
@@ -2159,16 +2869,10 @@ function updateNavBar(name, isRegistered) {
         settingsContainerDiv.id = 'settings-dropdown-btn-container';
         settingsContainerDiv.className = 'dropdown';
         settingsContainerDiv.innerHTML = `
-            <button id="settings-dropdown-btn" class="dropdown-btn">🏗️</button>
+            <button id="settings-dropdown-btn" class="dropdown-btn">Build</button>
             <div id="settings-dropdown-content" class="dropdown-content">
                 <div class="dropdown-section">
-                    <h4>EFP</h4>
-                    <div class="dropdown-buttons">
-                        <a href="https://efp.app/${name}" class="dropdown-button" id="nav-efp-link" target="_blank" rel="noopener noreferrer">Follow</a>
-                    </div>
-                </div>
-                <div class="dropdown-section">
-                    <h4>Design</h4>
+                    <h4><span class="step-num">1</span> Design</h4>
                     <div class="dropdown-controls-col">
                         <label class="control-button bg-control">
                             <input type="color" id="nav-bg-color" class="color-picker" title="Background">
@@ -2197,17 +2901,11 @@ function updateNavBar(name, isRegistered) {
                     </div>
                 </div>
                 <div class="dropdown-section">
-                    <h4>Website</h4>
+                    <h4><span class="step-num">2</span> Publish</h4>
                     <div class="dropdown-buttons">
                         <a href="#" class="dropdown-button download-website-button" id="nav-download-website">Download</a>
-                        <a href="https://pinata.cloud/" target="_blank" rel="noopener noreferrer" class="dropdown-button deploy-website-button">Deploy</a>
-                        <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect</a>
-                    </div>
-                </div>
-                <div class="dropdown-section">
-                    <h4>${profileTypeLabel}</h4>
-                    <div class="dropdown-buttons">
-                        <a href="${editRecordsLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button" id="nav-edit-records">Edit Records</a>
+                        <a href="#" class="dropdown-button deploy-website-button" id="nav-deploy-ipfs">Deploy to IPFS</a>
+                        <a href="${connectLink}" target="_blank" rel="noopener noreferrer" class="dropdown-button connect-website-button" id="nav-connect-website">Connect to ENS</a>
                     </div>
                 </div>
             </div>
@@ -2215,22 +2913,19 @@ function updateNavBar(name, isRegistered) {
         navButtons.appendChild(settingsContainerDiv);
         setupDropdown('settings-dropdown-btn', 'settings-dropdown-content');
 
-        // Create and append Coin Dropdown
-        const coinContainerDiv = document.createElement('div');
-        coinContainerDiv.id = 'coin-dropdown-btn-container';
-        coinContainerDiv.className = 'dropdown';
-        coinContainerDiv.innerHTML = `
-            <button id="coin-dropdown-btn" class="dropdown-btn">🪙</button>
-            <div id="coin-dropdown-content" class="dropdown-content">
-                <h4>Send Crypto</h4>
-                <div id="coin-qr-code-container" style="margin:10px auto; width:150px; height:150px; display:none;"></div>
-                <div id="coin-wallet-address" style="word-wrap:break-word; text-align:center; margin:5px 0;">[Wallet Address]</div>
-                <button id="coin-copy-address-btn" class="dropdown-button">Copy Address</button>
-                <a id="coin-explorer-link-btn" class="dropdown-button" href="#" target="_blank" rel="noopener noreferrer" style="margin-top: 5px; display: none;">[Explorer Link]</a>
+        // Create Connect Wallet button — click opens modal when disconnected, dropdown when connected
+        const connectContainerDiv = document.createElement('div');
+        connectContainerDiv.id = 'wallet-connect-container';
+        connectContainerDiv.className = 'dropdown';
+        connectContainerDiv.innerHTML = `
+            <button id="wallet-connect-btn" class="dropdown-btn">Connect</button>
+            <div id="wallet-connect-content" class="dropdown-content" style="display:none;">
+                <div id="wallet-connected-address" style="padding:10px 14px; font-size:0.75em; opacity:0.65; word-break:break-all;"></div>
+                <button id="wallet-disconnect-btn" class="dropdown-button">Disconnect</button>
             </div>
         `;
-        navButtons.appendChild(coinContainerDiv);
-        setupDropdown('coin-dropdown-btn', 'coin-dropdown-content');
+        navButtons.appendChild(connectContainerDiv);
+        initWalletConnect();
     }
 }
 
@@ -2260,7 +2955,13 @@ function displayUnregisteredProfile(ensName) {
         numberRecords.innerHTML = '';
         numberRecords.style.display = 'none';
     }
-    
+
+    // Hide profile card and action bar for unregistered profiles
+    const profileCardUnreg = document.querySelector('.profile-card');
+    if (profileCardUnreg) { profileCardUnreg.style.display = 'none'; profileCardUnreg.innerHTML = ''; }
+    const profileActionsUnreg = document.querySelector('.profile-actions');
+    if (profileActionsUnreg) { profileActionsUnreg.style.display = 'none'; profileActionsUnreg.innerHTML = ''; }
+
     // Reset to default theme colors based on current theme
     resetToDefaultThemeColors();
     
@@ -2307,23 +3008,19 @@ function displayUnregisteredProfile(ensName) {
         profilePage.appendChild(registerContainer);
     }
     
-    // Add register button with appropriate link and text
-    const registerButton = document.createElement('a');
-    registerButton.className = 'register-button';
-    
+    // Add register button
+    const registerButton = document.createElement('button');
+    registerButton.className = 'register-button dropdown-button';
+
     if (isBasename) {
-        // For Basenames, use the Base names URL format
         const basenameWithoutSuffix = ensName.replace('.base.eth', '');
-        registerButton.href = `https://www.base.org/names?claim=${basenameWithoutSuffix}`;
         registerButton.textContent = 'Register Basename';
+        registerButton.onclick = () => window.open(`https://www.base.org/names?claim=${basenameWithoutSuffix}`, '_blank', 'noopener,noreferrer');
     } else {
-        // For ENS names, use the ENS domains URL format
-        registerButton.href = `https://app.ens.domains/${ensName}`;
         registerButton.textContent = 'Register ENS';
+        registerButton.onclick = () => openRegisterModal(ensName);
     }
-    
-    registerButton.target = '_blank';
-    registerButton.rel = 'noopener noreferrer';
+
     registerContainer.innerHTML = '';
     registerContainer.appendChild(registerButton);
     
@@ -3307,6 +4004,9 @@ function setupDropdown(btnId, contentId) {
 
         if (navDownloadWebsite) navDownloadWebsite.addEventListener('click', (e) => { e.preventDefault(); generateDownload(); });
 
+        const navDeployIPFS = content.querySelector('#nav-deploy-ipfs');
+        if (navDeployIPFS) navDeployIPFS.addEventListener('click', (e) => { e.preventDefault(); openIPFSModal(); });
+
         const profilePage = document.getElementById('profile-page');
         if (profilePage) {
             const observer = new MutationObserver((mutations) => {
@@ -3397,13 +4097,19 @@ function setupDropdown(btnId, contentId) {
 document.addEventListener('click', (e) => {
     const openDropdowns = document.querySelectorAll('.dropdown-content.show');
     openDropdowns.forEach(dropdownContent => {
-        const btnId = dropdownContent.id.replace('-content', '-btn'); // Assumes button ID convention
+        const btnId = dropdownContent.id.replace('-content', '-btn');
         const dropdownBtn = document.getElementById(btnId);
-
         if (dropdownBtn && !dropdownBtn.contains(e.target) && !dropdownContent.contains(e.target)) {
             dropdownContent.classList.remove('show');
         }
     });
+    // Close wallet connected dropdown if clicking outside
+    const walletContent = document.getElementById('wallet-connect-content');
+    const walletBtn = document.getElementById('wallet-connect-btn');
+    if (walletContent && walletContent.classList.contains('show') &&
+        walletBtn && !walletBtn.contains(e.target) && !walletContent.contains(e.target)) {
+        walletContent.classList.remove('show');
+    }
 });
 
 // Function to handle cycling words in the slogan
@@ -3446,6 +4152,361 @@ function initializeCyclingWords() {
     
     // Start cycling
     cycleInterval = setInterval(cycleWords, 1785); // Change word every 1.785 seconds (15% faster than 2.1 seconds)
+}
+
+// ─── ethers.js helpers ───────────────────────────────────────────────────────
+
+function _getProvider() {
+    return new ethers.providers.Web3Provider(window.ethereum);
+}
+
+function _getReadProvider() {
+    return new ethers.providers.JsonRpcProvider('https://cloudflare-eth.com');
+}
+
+async function _getSigner() {
+    const provider = _getProvider();
+    await provider.send('eth_requestAccounts', []);
+    return provider.getSigner();
+}
+
+async function resolveRecipient(input) {
+    input = input.trim();
+    if (ethers.utils.isAddress(input)) return input;
+    const provider = _getReadProvider();
+    const resolved = await provider.resolveName(input);
+    if (!resolved) throw new Error(`Could not resolve "${input}"`);
+    return resolved;
+}
+
+// ─── Send crypto ─────────────────────────────────────────────────────────────
+
+async function sendToken(toInput, amount, tokenSymbol) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const signer = await _getSigner();
+    const to = await resolveRecipient(toInput);
+    const token = TOKENS[tokenSymbol];
+    if (!token) throw new Error(`Unknown token: ${tokenSymbol}`);
+
+    if (!token.address) {
+        // Native ETH transfer
+        const value = ethers.utils.parseEther(amount);
+        const tx = await signer.sendTransaction({ to, value });
+        await tx.wait();
+        return tx.hash;
+    } else {
+        // ERC-20 transfer
+        const erc20 = new ethers.Contract(token.address, [
+            'function transfer(address,uint256) returns (bool)',
+            'function decimals() view returns (uint8)'
+        ], signer);
+        const decimals = token.decimals;
+        const value = ethers.utils.parseUnits(amount, decimals);
+        const tx = await erc20.transfer(to, value);
+        await tx.wait();
+        return tx.hash;
+    }
+}
+
+// ─── Swap (ParaSwap v5) ───────────────────────────────────────────────────────
+
+function _paraswapAddr(sym) {
+    return sym === 'ETH' ? PARASWAP_ETH : (TOKENS[sym]?.address || null);
+}
+
+async function getSwapQuote(fromSym, toSym, amount) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const provider = _getProvider();
+    const accounts = await provider.listAccounts();
+    if (!accounts.length) throw new Error('Connect wallet first');
+    const userAddr = accounts[0];
+
+    const srcToken = _paraswapAddr(fromSym);
+    const destToken = _paraswapAddr(toSym);
+    const srcDecimals = TOKENS[fromSym]?.decimals || 18;
+    const destDecimals = TOKENS[toSym]?.decimals || 18;
+    const srcAmount = ethers.utils.parseUnits(amount, srcDecimals).toString();
+
+    const url = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${srcAmount}&srcDecimals=${srcDecimals}&destDecimals=${destDecimals}&side=SELL&network=1&userAddress=${userAddr}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`ParaSwap error: ${resp.status}`);
+    const data = await resp.json();
+    if (!data.priceRoute) throw new Error(data.error || 'No route found');
+
+    const destAmt = ethers.utils.formatUnits(data.priceRoute.destAmount, destDecimals);
+    return { priceRoute: data.priceRoute, estimate: `~${parseFloat(destAmt).toFixed(6)} ${toSym}`, srcAmount, srcToken, destToken, srcDecimals, destDecimals, userAddr, fromSym, toSym };
+}
+
+async function executeSwap(quote) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const signer = await _getSigner();
+    const userAddr = quote.userAddr;
+
+    const txResp = await fetch(`https://apiv5.paraswap.io/transactions/1?ignoreChecks=true`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            srcToken: quote.srcToken, destToken: quote.destToken,
+            srcAmount: quote.srcAmount, destAmount: quote.priceRoute.destAmount,
+            priceRoute: quote.priceRoute, userAddress: userAddr,
+            slippage: 100, srcDecimals: quote.srcDecimals, destDecimals: quote.destDecimals
+        })
+    });
+    if (!txResp.ok) throw new Error(`ParaSwap tx error: ${txResp.status}`);
+    const txData = await txResp.json();
+
+    // Approve ERC-20 if needed
+    if (quote.fromSym !== 'ETH') {
+        const tokenAddr = TOKENS[quote.fromSym].address;
+        const erc20 = new ethers.Contract(tokenAddr, ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)'], signer);
+        const allowance = await erc20.allowance(userAddr, txData.to);
+        if (allowance.lt(ethers.BigNumber.from(quote.srcAmount))) {
+            const approveTx = await erc20.approve(txData.to, ethers.constants.MaxUint256);
+            await approveTx.wait();
+        }
+    }
+
+    const tx = await signer.sendTransaction({ to: txData.to, data: txData.data, value: ethers.BigNumber.from(txData.value || '0'), gasLimit: txData.gas ? ethers.BigNumber.from(txData.gas) : undefined });
+    await tx.wait();
+    return tx.hash;
+}
+
+// ─── ENS Registration ─────────────────────────────────────────────────────────
+
+const _REGISTRAR_ABI = [
+    'function available(string) view returns (bool)',
+    'function rentPrice(string,uint256) view returns (tuple(uint256 base,uint256 premium))',
+    'function makeCommitment(string,address,uint256,bytes32,address,bytes[],bool,uint16) pure returns (bytes32)',
+    'function commit(bytes32)',
+    'function register(string,address,uint256,bytes32,address,bytes[],bool,uint16) payable'
+];
+
+async function openRegisterModal(ensName) {
+    const modal = document.getElementById('register-modal');
+    const body = document.getElementById('register-modal-body');
+    const title = document.getElementById('register-modal-title');
+    const submitBtn = document.getElementById('register-submit-btn');
+    if (!modal || !body) return;
+
+    const label = ensName.replace(/\.eth$/, '');
+    if (title) title.textContent = `Register ${ensName}`;
+    submitBtn.style.display = 'none';
+    body.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.6;">Checking availability…</div>';
+    modal.style.display = 'flex';
+
+    try {
+        const provider = _getReadProvider();
+        const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, provider);
+        const available = await registrar.available(label);
+
+        if (!available) {
+            body.innerHTML = '<div class="register-availability" style="color:#e44;">Name is already registered.</div>';
+            return;
+        }
+
+        const YEAR_SECS = 365 * 24 * 3600;
+        const price = await registrar.rentPrice(label, YEAR_SECS);
+        const totalWei = price.base.add(price.premium);
+        const totalEth = parseFloat(ethers.utils.formatEther(totalWei)).toFixed(6);
+
+        body.innerHTML = `
+            <div class="register-availability" style="color:#4a4;">✓ Available</div>
+            <div class="register-price">~${totalEth} ETH / year</div>
+            <div class="register-steps">
+                <div class="register-step" id="reg-step1"><span class="step-dot" id="reg-dot1"></span>Step 1: Commit</div>
+                <div class="register-step dim" id="reg-step2"><span class="step-dot" id="reg-dot2"></span>Step 2: Wait 60s</div>
+                <div class="register-step dim" id="reg-step3"><span class="step-dot" id="reg-dot3"></span>Step 3: Register</div>
+            </div>
+            <div id="reg-status" class="crypto-status" style="margin-top:10px;"></div>
+        `;
+        submitBtn.style.display = 'block';
+        submitBtn.textContent = 'Register';
+        submitBtn.onclick = () => _executeRegistration(label, ensName, totalWei);
+    } catch (e) {
+        body.innerHTML = `<div class="register-availability">Error: ${e.message || e}</div>`;
+    }
+
+    document.getElementById('register-modal-close').onclick = () => { modal.style.display = 'none'; };
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+}
+
+async function _executeRegistration(label, ensName, priceWei) {
+    if (!window.ethereum) { alert('Connect your wallet first.'); return; }
+    const submitBtn = document.getElementById('register-submit-btn');
+    const status = document.getElementById('reg-status');
+    const setStatus = (msg) => { if (status) status.textContent = msg; };
+
+    submitBtn.disabled = true;
+    try {
+        const signer = await _getSigner();
+        const userAddr = await signer.getAddress();
+        const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, signer);
+
+        const YEAR_SECS = 365 * 24 * 3600;
+        const secret = ethers.utils.randomBytes(32);
+        const commitment = await registrar.makeCommitment(label, userAddr, YEAR_SECS, secret, ENS_PUBLIC_RESOLVER, [], false, 0);
+
+        setStatus('Sending commit transaction…');
+        document.getElementById('reg-dot1').classList.add('done');
+        const commitTx = await registrar.commit(commitment);
+        await commitTx.wait();
+
+        document.getElementById('reg-step2').classList.remove('dim');
+        setStatus('Waiting 60 seconds before registration…');
+        await new Promise(r => setTimeout(r, 62000));
+
+        document.getElementById('reg-dot2').classList.add('done');
+        document.getElementById('reg-step3').classList.remove('dim');
+        setStatus('Sending register transaction…');
+
+        // Add 10% buffer on price
+        const value = priceWei.mul(110).div(100);
+        const registerTx = await registrar.register(label, userAddr, YEAR_SECS, secret, ENS_PUBLIC_RESOLVER, [], false, 0, { value });
+        await registerTx.wait();
+
+        document.getElementById('reg-dot3').classList.add('done');
+        setStatus(`${ensName} registered! Tx: ${registerTx.hash.slice(0,10)}…`);
+        submitBtn.style.display = 'none';
+    } catch (e) {
+        setStatus(`Error: ${e.message || e}`);
+        submitBtn.disabled = false;
+    }
+}
+
+// ─── IPFS Deploy (Pinata) ─────────────────────────────────────────────────────
+
+function _base58Decode(s) {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let n = BigInt(0);
+    for (const c of s) {
+        const idx = ALPHABET.indexOf(c);
+        if (idx < 0) throw new Error('Invalid base58 char: ' + c);
+        n = n * BigInt(58) + BigInt(idx);
+    }
+    const bytes = [];
+    while (n > 0n) { bytes.unshift(Number(n & 0xffn)); n >>= 8n; }
+    for (const c of s) { if (c !== '1') break; bytes.unshift(0); }
+    return new Uint8Array(bytes);
+}
+
+function _cidToContenthash(cid) {
+    const decoded = _base58Decode(cid);
+    const prefix = new Uint8Array([0xe3, 0x01, 0x01, 0x70]);
+    const result = new Uint8Array(prefix.length + decoded.length);
+    result.set(prefix); result.set(decoded, prefix.length);
+    return '0x' + Array.from(result).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function openIPFSModal() {
+    const modal = document.getElementById('ipfs-modal');
+    const body = document.getElementById('ipfs-modal-body');
+    const deployBtn = document.getElementById('ipfs-deploy-btn');
+    if (!modal || !body) return;
+
+    body.innerHTML = `
+        <div class="edit-field" style="margin-bottom:12px;">
+            <label>Pinata JWT API Key</label>
+            <input type="password" id="pinata-jwt" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…" autocomplete="off">
+        </div>
+        <div style="font-size:0.75em;opacity:0.55;margin-bottom:8px;">Get a free key at <a href="https://pinata.cloud" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">pinata.cloud</a></div>
+        <div id="ipfs-status" class="crypto-status"></div>
+    `;
+    modal.style.display = 'flex';
+
+    deployBtn.onclick = () => _runIPFSDeploy();
+    document.getElementById('ipfs-modal-close').onclick = () => { modal.style.display = 'none'; };
+    modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+}
+
+async function _runIPFSDeploy() {
+    const jwt = document.getElementById('pinata-jwt')?.value?.trim();
+    const status = document.getElementById('ipfs-status');
+    const deployBtn = document.getElementById('ipfs-deploy-btn');
+    const setStatus = (msg) => { if (status) status.textContent = msg; };
+
+    if (!jwt) { setStatus('Please enter your Pinata JWT.'); return; }
+
+    deployBtn.disabled = true;
+    setStatus('Building website…');
+
+    try {
+        const html = await _buildDeployHTML();
+        const blob = new Blob([html], { type: 'text/html' });
+        const formData = new FormData();
+        formData.append('file', blob, 'index.html');
+        formData.append('pinataMetadata', JSON.stringify({ name: `geocities-${_currentProfileEnsName || 'site'}` }));
+
+        setStatus('Uploading to IPFS…');
+        const resp = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${jwt}` },
+            body: formData
+        });
+
+        if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(`Pinata error ${resp.status}: ${err}`);
+        }
+
+        const data = await resp.json();
+        const cid = data.IpfsHash;
+        setStatus(`Uploaded! CID: ${cid}`);
+
+        if (_connectedWallet && _currentProfileEnsName && !_currentProfileEnsName.endsWith('.base.eth')) {
+            const connectLink = `https://app.ens.domains/${_currentProfileEnsName}`;
+            status.innerHTML += `<br><a href="${connectLink}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">Set contenthash on ENS ↗</a> or <button id="ipfs-set-contenthash-btn" class="dropdown-button" style="font-size:0.8em;padding:4px 10px;margin-top:6px;">Set via Wallet</button>`;
+            document.getElementById('ipfs-set-contenthash-btn')?.addEventListener('click', async () => {
+                try {
+                    setStatus('Setting contenthash on ENS…');
+                    const txHash = await _setContenthash(cid);
+                    setStatus(`Done! Tx: ${txHash.slice(0,10)}…`);
+                } catch (e) { setStatus(`Error: ${e.message || e}`); }
+            });
+        }
+    } catch (e) {
+        setStatus(`Error: ${e.message || e}`);
+    } finally {
+        deployBtn.disabled = false;
+    }
+}
+
+async function _buildDeployHTML() {
+    const resp = await fetch('download-template.html');
+    if (!resp.ok) throw new Error('Could not load template');
+    let html = await resp.text();
+
+    const bgColor = document.getElementById('bg-color')?.value || '#000000';
+    const textColor = document.getElementById('text-color')?.value || '#00ff00';
+    const borderColor = document.getElementById('border-color')?.value || '#00ff00';
+    const effect = document.getElementById('effect-select')?.value || 'none';
+
+    html = html.replace(/\{\{BG_COLOR\}\}/g, bgColor)
+               .replace(/\{\{TEXT_COLOR\}\}/g, textColor)
+               .replace(/\{\{BORDER_COLOR\}\}/g, borderColor)
+               .replace(/\{\{EFFECT\}\}/g, effect)
+               .replace(/\{\{ENS_NAME\}\}/g, _currentProfileEnsName || '')
+               .replace(/\{\{ADDRESS\}\}/g, _currentProfileAddress || '');
+
+    if (_currentProfileData) {
+        const d = _currentProfileData;
+        html = html.replace(/\{\{AVATAR\}\}/g, d.avatar || '')
+                   .replace(/\{\{DISPLAY_NAME\}\}/g, d.displayName || _currentProfileEnsName || '')
+                   .replace(/\{\{BIO\}\}/g, d.description || '');
+    }
+    return html;
+}
+
+async function _setContenthash(cid) {
+    if (!window.ethereum) throw new Error('No wallet connected');
+    const signer = await _getSigner();
+    const ensNode = ethers.utils.namehash(_currentProfileEnsName);
+    const contenthash = _cidToContenthash(cid);
+    const resolver = new ethers.Contract(ENS_PUBLIC_RESOLVER, [
+        'function setContenthash(bytes32,bytes)'
+    ], signer);
+    const tx = await resolver.setContenthash(ensNode, contenthash);
+    await tx.wait();
+    return tx.hash;
 }
 
 // Initialize PWA support when the page loads
