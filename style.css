@@ -582,6 +582,29 @@ h1#homepage-geocities {
     white-space: nowrap;
 }
 
+.wallet-modal-hint {
+    font-size: 0.72em;
+    opacity: 0.55;
+    text-align: center;
+    padding: 10px 16px 6px;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.wallet-modal-copy-fallback {
+    width: calc(100% - 32px);
+    margin: 8px 16px;
+    padding: 8px 10px;
+    background: transparent;
+    color: var(--primary-color);
+    border: 1px solid var(--border-color);
+    font-family: inherit;
+    font-size: 0.75em;
+    resize: none;
+    height: 54px;
+    word-break: break-all;
+}
+
 /* Edit Records modal body */
 .edit-modal-body {
     padding: 16px 20px;

@@ -2809,21 +2809,41 @@ function updateWalletUI() {
 }
 
 // Open the wallet selection modal — uses EIP-6963, legacy injection, or mobile deep links
-function openWalletModal() {
+async function openWalletModal() {
     const modal = document.getElementById('wallet-modal');
     const list = document.getElementById('wallet-modal-list');
     if (!modal || !list) return;
 
-    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const dappUrl = window.location.href;
-    const dappHost = window.location.hostname + window.location.pathname;
+    document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
+    modal.classList.add('open');
 
-    // Mobile deep links — open dapp inside the wallet's in-app browser
+    // Show a brief detection state and re-request EIP-6963 announcements —
+    // on mobile, injected providers sometimes announce after page load, so
+    // giving them a tick to respond avoids falsely falling through to deep links.
+    list.innerHTML = '<p class="wallet-modal-hint">Detecting wallets…</p>';
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    await new Promise(r => setTimeout(r, 350));
+    _renderWalletModalList();
+}
+
+function _renderWalletModalList() {
+    const list = document.getElementById('wallet-modal-list');
+    if (!list) return;
+
+    const ua = navigator.userAgent || '';
+    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    const dappUrl = window.location.href;
+    // metamask.app.link expects host + path, no scheme, no leading slash
+    const dappHostPath = (window.location.host + window.location.pathname).replace(/\/+$/, '') || window.location.host;
+
+    // Mobile deep links — open dapp inside the wallet's in-app browser.
+    // URLs verified against each wallet's current (2025) docs.
     const mobileLinks = {
-        'io.metamask':         `https://metamask.app.link/dapp/${dappHost}`,
-        'app.rainbow':         `https://rnbwapp.com/dapp?url=${encodeURIComponent(dappUrl)}`,
-        'xyz.coinbase.wallet': `https://go.cb-wallet.com/dapp?url=${encodeURIComponent(dappUrl)}`,
-        'com.trustwallet.app': `https://link.trustwallet.com/open_url?url=${encodeURIComponent(dappUrl)}`,
+        'io.metamask':         `https://metamask.app.link/dapp/${dappHostPath}`,
+        'app.rainbow':         `https://rnbwapp.com/open?url=${encodeURIComponent(dappUrl)}`,
+        'xyz.coinbase.wallet': `https://go.cb-wallet.com/dapp?cb_url=${encodeURIComponent(dappUrl)}`,
+        'com.trustwallet.app': `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(dappUrl)}`,
+        'me.rainbow':          `https://rnbwapp.com/open?url=${encodeURIComponent(dappUrl)}`,
     };
 
     // Known wallet info for fallback detection / display
@@ -2834,6 +2854,12 @@ function openWalletModal() {
         { rdns: 'com.brave.wallet',    name: 'Brave Wallet',   icon: '🦁', test: p => p.isBraveWallet,                     installUrl: 'https://brave.com/wallet/' },
         { rdns: 'com.trustwallet.app', name: 'Trust Wallet',   icon: '🛡️', test: p => p.isTrust,                           installUrl: 'https://trustwallet.com/download' },
     ];
+
+    // Detect in-app wallet browser — window.ethereum injected by a mobile wallet.
+    // Show a clearer "Connect [name]" row so users know they're already inside a wallet.
+    const inAppInfo = (isMobile && window.ethereum)
+        ? knownWallets.find(w => w.test(window.ethereum)) || { name: 'Wallet Browser', icon: '📱', rdns: 'unknown' }
+        : null;
 
     list.innerHTML = '';
 
@@ -2863,7 +2889,7 @@ function openWalletModal() {
         } catch (e) { console.warn('Wallet connect rejected:', e); }
     };
 
-    // 1. EIP-6963 providers (desktop extensions) — the most reliable detection
+    // 1. EIP-6963 providers — the canonical discovery channel
     for (const { info, provider } of _eip6963Providers) {
         const iconHtml = info.icon
             ? `<img src="${info.icon}" alt="${info.name}" style="width:100%;height:100%;object-fit:contain;">`
@@ -2871,8 +2897,14 @@ function openWalletModal() {
         makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider, info));
     }
 
-    // 2. Legacy window.ethereum (for wallets that don't announce via EIP-6963)
-    if (_eip6963Providers.length === 0 && window.ethereum) {
+    // 2. In-app wallet browser — mobile user already has a wallet injected, promote it
+    if (inAppInfo && _eip6963Providers.length === 0) {
+        makeRow(inAppInfo.icon, inAppInfo.name, 'In-app browser', 'Connect',
+            () => connectWith(window.ethereum, { name: inAppInfo.name, rdns: inAppInfo.rdns }));
+    }
+
+    // 3. Desktop legacy injection (window.ethereum on non-mobile, no 6963 announcement)
+    if (_eip6963Providers.length === 0 && window.ethereum && !isMobile) {
         const legacyProviders = window.ethereum.providers || [window.ethereum];
         for (const p of legacyProviders) {
             const def = knownWallets.find(w => w.test(p));
@@ -2882,28 +2914,54 @@ function openWalletModal() {
         }
     }
 
-    // 3. Mobile deep links — when no injected wallets, let user open the dapp inside their wallet app
-    if (_eip6963Providers.length === 0 && !window.ethereum && isMobile) {
+    // 4. Mobile deep links — always show on mobile when no in-app wallet is injected
+    if (isMobile && !inAppInfo && _eip6963Providers.length === 0) {
         for (const w of knownWallets) {
             const deepLink = mobileLinks[w.rdns];
             if (!deepLink) continue;
             makeRow(w.icon, w.name, 'Open in app', 'Open', () => {
+                // Use a link-style navigation so iOS Safari treats it as a user gesture
+                // and actually triggers the universal link to the wallet app.
+                const a = document.createElement('a');
+                a.href = deepLink;
+                a.rel = 'noopener noreferrer';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 0);
                 closeWalletModal();
-                window.location.href = deepLink;
             });
         }
-        // Explain why we're showing open links
+        // Copy-URL fallback — works with any wallet that has a built-in browser
+        makeRow('🔗', 'Copy page link', 'Paste into any wallet browser', 'Copy', async () => {
+            try {
+                await navigator.clipboard.writeText(dappUrl);
+                const hint = document.createElement('p');
+                hint.className = 'wallet-modal-hint';
+                hint.textContent = 'Link copied. Open your wallet, go to its browser tab, and paste.';
+                list.appendChild(hint);
+            } catch {
+                // clipboard may be blocked — show the URL for manual copy
+                const pre = document.createElement('textarea');
+                pre.className = 'wallet-modal-copy-fallback';
+                pre.readOnly = true;
+                pre.value = dappUrl;
+                list.appendChild(pre);
+                pre.select();
+            }
+        });
         const note = document.createElement('p');
-        note.style.cssText = 'font-size:0.72em;opacity:0.5;text-align:center;padding:10px 16px 4px;margin:0;line-height:1.5;';
-        note.textContent = 'Tapping "Open" loads this page inside your wallet\'s browser where you can connect.';
+        note.className = 'wallet-modal-hint';
+        note.textContent = 'Tap "Open" to launch your wallet. Once the dapp loads inside the wallet, come back here and tap Connect.';
         list.appendChild(note);
     }
 
-    // 4. Desktop install options (always shown when wallet not detected on desktop)
+    // 5. Desktop install options
     if (!isMobile) {
         const eip6963Rdns = new Set(_eip6963Providers.map(p => p.info.rdns));
+        const hasLegacy = window.ethereum && knownWallets.find(k => k.test(window.ethereum));
         for (const w of knownWallets) {
-            if (!eip6963Rdns.has(w.rdns) && !(window.ethereum && knownWallets.find(k => k.test(window.ethereum)))) {
+            if (!eip6963Rdns.has(w.rdns) && !hasLegacy) {
                 makeRow(w.icon, w.name, 'Not installed', 'Get', () => {
                     window.open(w.installUrl, '_blank', 'noopener,noreferrer');
                     closeWalletModal();
@@ -2913,11 +2971,8 @@ function openWalletModal() {
     }
 
     if (list.children.length === 0) {
-        list.innerHTML = '<p style="padding:16px;text-align:center;opacity:0.5;font-size:0.85em;">No wallets detected.<br>Install a wallet extension to continue.</p>';
+        list.innerHTML = '<p class="wallet-modal-hint">No wallets detected. Install a wallet extension to continue.</p>';
     }
-
-    document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
-    modal.classList.add('open');
 }
 
 function closeWalletModal() {
