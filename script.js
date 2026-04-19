@@ -2833,18 +2833,6 @@ function _renderWalletModalList() {
     const ua = navigator.userAgent || '';
     const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
     const dappUrl = window.location.href;
-    // metamask.app.link expects host + path, no scheme, no leading slash
-    const dappHostPath = (window.location.host + window.location.pathname).replace(/\/+$/, '') || window.location.host;
-
-    // Mobile deep links — open dapp inside the wallet's in-app browser.
-    // URLs verified against each wallet's current (2025) docs.
-    const mobileLinks = {
-        'io.metamask':         `https://metamask.app.link/dapp/${dappHostPath}`,
-        'app.rainbow':         `https://rnbwapp.com/open?url=${encodeURIComponent(dappUrl)}`,
-        'xyz.coinbase.wallet': `https://go.cb-wallet.com/dapp?cb_url=${encodeURIComponent(dappUrl)}`,
-        'com.trustwallet.app': `https://link.trustwallet.com/open_url?coin_id=60&url=${encodeURIComponent(dappUrl)}`,
-        'me.rainbow':          `https://rnbwapp.com/open?url=${encodeURIComponent(dappUrl)}`,
-    };
 
     // Known wallet info for fallback detection / display
     const knownWallets = [
@@ -2856,7 +2844,6 @@ function _renderWalletModalList() {
     ];
 
     // Detect in-app wallet browser — window.ethereum injected by a mobile wallet.
-    // Show a clearer "Connect [name]" row so users know they're already inside a wallet.
     const inAppInfo = (isMobile && window.ethereum)
         ? knownWallets.find(w => w.test(window.ethereum)) || { name: 'Wallet Browser', icon: '📱', rdns: 'unknown' }
         : null;
@@ -2897,7 +2884,7 @@ function _renderWalletModalList() {
         makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider, info));
     }
 
-    // 2. In-app wallet browser — mobile user already has a wallet injected, promote it
+    // 2. In-app wallet browser — mobile user already has a wallet injected
     if (inAppInfo && _eip6963Providers.length === 0) {
         makeRow(inAppInfo.icon, inAppInfo.name, 'In-app browser', 'Connect',
             () => connectWith(window.ethereum, { name: inAppInfo.name, rdns: inAppInfo.rdns }));
@@ -2914,34 +2901,20 @@ function _renderWalletModalList() {
         }
     }
 
-    // 4. Mobile deep links — always show on mobile when no in-app wallet is injected
+    // 4. Mobile with no injected wallet — copy-URL fallback (safe, no third-party redirect).
+    //    Hand-rolled deep links were removed: stale URLs, can't verify the redirect lands on the
+    //    real wallet host, and they break when the dapp is served from an IPFS gateway.
+    //    WalletConnect/Reown is the right long-term path — tracked separately.
     if (isMobile && !inAppInfo && _eip6963Providers.length === 0) {
-        for (const w of knownWallets) {
-            const deepLink = mobileLinks[w.rdns];
-            if (!deepLink) continue;
-            makeRow(w.icon, w.name, 'Open in app', 'Open', () => {
-                // Use a link-style navigation so iOS Safari treats it as a user gesture
-                // and actually triggers the universal link to the wallet app.
-                const a = document.createElement('a');
-                a.href = deepLink;
-                a.rel = 'noopener noreferrer';
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => a.remove(), 0);
-                closeWalletModal();
-            });
-        }
-        // Copy-URL fallback — works with any wallet that has a built-in browser
-        makeRow('🔗', 'Copy page link', 'Paste into any wallet browser', 'Copy', async () => {
+        makeRow('🔗', 'Copy page link', 'Paste into your wallet\'s built-in browser', 'Copy', async () => {
             try {
                 await navigator.clipboard.writeText(dappUrl);
                 const hint = document.createElement('p');
                 hint.className = 'wallet-modal-hint';
-                hint.textContent = 'Link copied. Open your wallet, go to its browser tab, and paste.';
+                hint.textContent = 'Link copied. Open your wallet app, go to its browser tab, and paste.';
                 list.appendChild(hint);
             } catch {
-                // clipboard may be blocked — show the URL for manual copy
+                // clipboard may be blocked — show the URL for manual selection
                 const pre = document.createElement('textarea');
                 pre.className = 'wallet-modal-copy-fallback';
                 pre.readOnly = true;
@@ -2952,7 +2925,7 @@ function _renderWalletModalList() {
         });
         const note = document.createElement('p');
         note.className = 'wallet-modal-hint';
-        note.textContent = 'Tap "Open" to launch your wallet. Once the dapp loads inside the wallet, come back here and tap Connect.';
+        note.textContent = 'To connect a mobile wallet: open MetaMask, Rainbow, Coinbase Wallet, or Trust, use its built-in browser, and paste this page\'s link.';
         list.appendChild(note);
     }
 
