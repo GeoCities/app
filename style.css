@@ -592,6 +592,66 @@ h1#homepage-geocities {
     gap: 10px;
 }
 
+.primary-name-banner {
+    background: rgba(128, 128, 128, 0.08);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.88em;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.primary-name-banner.is-primary {
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
+}
+
+.primary-name-banner .primary-name-check {
+    font-weight: bold;
+}
+
+.primary-name-banner .primary-name-text {
+    opacity: 0.8;
+}
+
+.primary-name-banner .primary-name-btn {
+    align-self: flex-start;
+    font-size: 0.85em;
+}
+
+.avatar-field-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.avatar-field-row input {
+    min-width: 0;
+}
+
+.avatar-upload-btn {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.send-fee-optin {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82em;
+    padding: 6px 2px;
+    opacity: 0.85;
+    cursor: pointer;
+    user-select: none;
+}
+
+.send-fee-optin input[type="checkbox"] {
+    cursor: pointer;
+}
+
 .edit-field {
     display: flex;
     flex-direction: column;
@@ -1424,6 +1484,17 @@ h1#homepage-geocities {
 
 .profile-action-btn.active {
     opacity: 0.5;
+}
+
+.profile-action-btn[data-following="true"] {
+    color: var(--accent-color, var(--primary-color));
+    opacity: 0.85;
+}
+
+.profile-action-btn[data-following="true"]:hover::after {
+    content: " · Unfollow";
+    font-size: 0.85em;
+    opacity: 0.7;
 }
 
 /* Inline crypto panel — collapsible, sits between action bar and records */

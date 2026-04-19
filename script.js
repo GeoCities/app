@@ -51,6 +51,22 @@ const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 // ENS on-chain contract addresses
 const ENS_REGISTRAR = '0x253553366Da8546fC250F225fe3d25d0C782303b';
 const ENS_PUBLIC_RESOLVER = '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63';
+const ENS_REVERSE_REGISTRAR = '0xa58E81fe9b61B5c3fE2AFD33CF304c454AbFc7Cb';
+
+// Optional 1% protocol fee on tips — destination resolves to geocities.eth on-chain
+// or the mapped address below. Leave empty to disable the fee entirely.
+const GEOCITIES_FEE_RECIPIENT = 'geocities.eth';
+const GEOCITIES_FEE_BPS = 100; // 1.00%
+
+function _formatFeeAmount(amountStr, tokenSymbol) {
+    const amt = parseFloat(amountStr);
+    if (!isFinite(amt) || amt <= 0) return null;
+    const fee = amt * (GEOCITIES_FEE_BPS / 10000);
+    const decimals = (tokenSymbol === 'USDC' || tokenSymbol === 'USDT') ? 6 : 8;
+    const rounded = parseFloat(fee.toFixed(decimals));
+    if (rounded <= 0) return null;
+    return String(rounded);
+}
 
 // Token definitions (symbol → address + decimals)
 const TOKENS = {
@@ -2278,14 +2294,24 @@ function displayProfile(data, ensName) {
             amountInput?.focus();
         });
 
-        // Follow: on-chain via EFP when wallet connected, else open efp.app
-        document.getElementById('profile-follow-btn')?.addEventListener('click', () => {
-            if (_connectedWallet) {
-                _efpFollow(_currentProfileAddress, _currentProfileEnsName);
-            } else {
+        // Follow / Unfollow: toggle via EFP when wallet connected, else open efp.app
+        document.getElementById('profile-follow-btn')?.addEventListener('click', (e) => {
+            if (!_connectedWallet) {
                 window.open(`https://efp.app/${ensName}`, '_blank', 'noopener,noreferrer');
+                return;
+            }
+            const btn = e.currentTarget;
+            if (btn.dataset.following === 'true') {
+                _efpUnfollow(_currentProfileAddress, _currentProfileEnsName);
+            } else {
+                _efpFollow(_currentProfileAddress, _currentProfileEnsName);
             }
         });
+
+        // Reflect existing follow state if wallet already connected
+        if (_connectedWallet && _currentProfileAddress) {
+            _efpRefreshFollowButton(_currentProfileAddress);
+        }
 
         // Edit Records: inline modal when wallet connected, else link to ENS app
         document.getElementById('profile-edit-btn')?.addEventListener('click', () => {
@@ -2502,61 +2528,83 @@ function normalizeUrl(url) {
 }
 
 // Populate the inline crypto panel with QR code, address, and explorer link
-// EFP on-chain follow
+// EFP on-chain follow/unfollow
 // Contracts (Ethereum mainnet):
 //   AccountMetadata: 0x5289fE5daBC021D02FDDf23d4a4DF96F4E0F17EF
 //   ListRegistry:    0x0E688f5DCa4a0a4729946ACbC44C792341714e08
 //   ListRecords:     0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33
-async function _efpFollow(targetAddress, targetEnsName) {
+
+async function _efpGetPrimaryListLocation(userAddress) {
+    const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${userAddress}/primary-list`);
+    if (!listResp.ok) return null;
+    const listData = await listResp.json();
+    const tokenId = listData.primary_list ?? listData.token_id ?? listData.list;
+    if (tokenId === null || tokenId === undefined) return null;
+
+    let listContract = '0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33';
+    let slot = BigInt(tokenId);
+    const locResp = await fetch(`https://api.ethfollow.xyz/api/v1/lists/${tokenId}/storage-location`).catch(() => null);
+    if (locResp && locResp.ok) {
+        const loc = await locResp.json();
+        const nonce = loc.nonce ?? loc.slot ?? loc.list_storage_location?.nonce;
+        const addr = loc.contract_address ?? loc.list_storage_location?.contract_address;
+        if (nonce !== undefined) slot = BigInt(nonce);
+        if (addr) listContract = addr;
+    }
+    return { tokenId, listContract, slot };
+}
+
+async function _efpCheckFollows(userAddress, targetAddress) {
+    try {
+        const resp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${userAddress}/following/${targetAddress}`);
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        return !!(data?.following ?? data?.is_following ?? data?.result);
+    } catch { return false; }
+}
+
+async function _efpApplyListOp(opcode, targetAddress, targetEnsName) {
+    // opcode 0x01 = add, 0x02 = remove
     const followBtn = document.getElementById('profile-follow-btn');
     const setFollowBtn = (text, disabled) => {
         if (followBtn) { followBtn.textContent = text; followBtn.disabled = !!disabled; }
     };
-    setFollowBtn('Following…', true);
+    const isAdd = opcode === 0x01;
+    setFollowBtn(isAdd ? 'Following…' : 'Unfollowing…', true);
 
     try {
         if (!_connectedWallet) throw new Error('No wallet connected');
         await _ensureChain('0x1');
-        // 1. Get connected user's primary list from EFP API
-        const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet.address}/primary-list`);
-        if (!listResp.ok) throw new Error('no primary list');
-        const listData = await listResp.json();
-
-        // Extract token ID and storage location info from API response
-        const tokenId = listData.primary_list || listData.token_id || listData.list;
-        if (!tokenId && tokenId !== 0) throw new Error('no primary list token');
-
-        // 2. Get list storage location (chainId, contract, nonce/slot)
-        // Try EFP API first, then fallback to contract call
-        let listContract = '0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33';
-        let slot = BigInt(tokenId);
-
-        const locResp = await fetch(`https://api.ethfollow.xyz/api/v1/lists/${tokenId}/storage-location`).catch(() => null);
-        if (locResp && locResp.ok) {
-            const loc = await locResp.json();
-            const nonce = loc.nonce ?? loc.slot ?? loc.list_storage_location?.nonce;
-            const addr = loc.contract_address ?? loc.list_storage_location?.contract_address;
-            if (nonce !== undefined) slot = BigInt(nonce);
-            if (addr) listContract = addr;
+        const location = await _efpGetPrimaryListLocation(_connectedWallet.address);
+        if (!location) {
+            // No list yet — offer to create one via efp.app (on-chain mint is non-trivial)
+            setFollowBtn('Follow', false);
+            _txToast.add({
+                title: 'No EFP list yet',
+                sub: 'Create your list on efp.app, then come back to follow.',
+                kind: 'error',
+                autoDismissMs: 8000
+            });
+            window.open('https://efp.app/', '_blank', 'noopener,noreferrer');
+            return;
         }
 
-        // 3. Build the follow list operation bytes
-        // Format: version(1) || opcode=add(1) || record_version(1) || record_type=address(1) || address(20)
+        const opHex = isAdd ? '01' : '02';
         const addrHex = (targetAddress || '0x0000000000000000000000000000000000000000').replace('0x', '').padStart(40, '0');
-        const opBytes = '01010101' + addrHex; // 24 bytes
+        const opBytes = '01' + opHex + '0101' + addrHex; // 24 bytes
         const opPadded = opBytes.padEnd(64, '0');
 
-        // 4. ABI encode applyListOp(uint256 slot, bytes op) — selector 0x5aaf83db
-        const slotHex = slot.toString(16).padStart(64, '0');
+        const slotHex = location.slot.toString(16).padStart(64, '0');
         const bytesOffset = '0000000000000000000000000000000000000000000000000000000000000040';
-        const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
+        const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018';
         const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
 
-        const toast = _txToast.add({ title: `Follow ${targetEnsName || targetAddress}`, sub: 'Confirm in wallet\u2026' });
+        const actionLabel = isAdd ? 'Follow' : 'Unfollow';
+        const toast = _txToast.add({ title: `${actionLabel} ${targetEnsName || targetAddress}`, sub: 'Confirm in wallet\u2026' });
         try {
             const txHash = await _getWalletProvider().request({
                 method: 'eth_sendTransaction',
-                params: [{ from: _connectedWallet.address, to: listContract, data: calldata }]
+                params: [{ from: _connectedWallet.address, to: location.listContract, data: calldata }]
             });
             toast.update({ kind: 'success', sub: 'Submitted', txHash, autoDismissMs: 10000 });
         } catch (txErr) {
@@ -2564,13 +2612,37 @@ async function _efpFollow(targetAddress, targetEnsName) {
             throw txErr;
         }
 
-        setFollowBtn('Following!', false);
-        setTimeout(() => setFollowBtn('Follow', false), 3000);
+        if (isAdd) {
+            setFollowBtn('Following', false);
+            if (followBtn) followBtn.dataset.following = 'true';
+        } else {
+            setFollowBtn('Follow', false);
+            if (followBtn) followBtn.dataset.following = 'false';
+        }
     } catch (e) {
-        console.warn('EFP on-chain follow failed, opening efp.app:', e);
-        setFollowBtn('Follow', false);
-        window.open(`https://efp.app/${targetEnsName || targetAddress}`, '_blank', 'noopener,noreferrer');
+        console.warn('EFP on-chain op failed:', e);
+        setFollowBtn(isAdd ? 'Follow' : 'Following', false);
     }
+}
+
+async function _efpFollow(targetAddress, targetEnsName) {
+    return _efpApplyListOp(0x01, targetAddress, targetEnsName);
+}
+
+async function _efpUnfollow(targetAddress, targetEnsName) {
+    return _efpApplyListOp(0x02, targetAddress, targetEnsName);
+}
+
+async function _efpRefreshFollowButton(targetAddress) {
+    const followBtn = document.getElementById('profile-follow-btn');
+    if (!followBtn || !_connectedWallet || !targetAddress) return;
+    if (_connectedWallet.address.toLowerCase() === targetAddress.toLowerCase()) {
+        followBtn.style.display = 'none';
+        return;
+    }
+    const isFollowing = await _efpCheckFollows(_connectedWallet.address, targetAddress);
+    followBtn.dataset.following = isFollowing ? 'true' : 'false';
+    followBtn.textContent = isFollowing ? 'Following' : 'Follow';
 }
 
 function populateCryptoPanel(address, ensName) {
@@ -2636,6 +2708,7 @@ function populateCryptoPanel(address, ensName) {
             const toInput = document.getElementById('send-to')?.value?.trim();
             const amount = document.getElementById('send-amount')?.value?.trim();
             const token = document.getElementById('send-token')?.value;
+            const feeOptIn = document.getElementById('send-fee-optin')?.checked;
             if (!toInput || !amount) { if (sendStatus) sendStatus.textContent = 'Please fill in all fields.'; return; }
             sendBtn.disabled = true;
             if (sendStatus) sendStatus.textContent = 'Sending…';
@@ -2644,6 +2717,20 @@ function populateCryptoPanel(address, ensName) {
                 const txHash = await sendToken(toInput, amount, token);
                 if (sendStatus) sendStatus.textContent = `Sent! Tx: ${txHash.slice(0,10)}…`;
                 toast.update({ kind: 'success', sub: 'Confirmed', txHash, autoDismissMs: 10000 });
+
+                if (feeOptIn && GEOCITIES_FEE_RECIPIENT) {
+                    const feeAmount = _formatFeeAmount(amount, token);
+                    if (feeAmount) {
+                        const feeToast = _txToast.add({ title: `Support GeoCities`, sub: `Confirm ${feeAmount} ${token} tip…` });
+                        try {
+                            const feeHash = await sendToken(GEOCITIES_FEE_RECIPIENT, feeAmount, token);
+                            feeToast.update({ kind: 'success', sub: 'Thanks for the support!', txHash: feeHash, autoDismissMs: 10000 });
+                        } catch (feeErr) {
+                            console.warn('Fee tx skipped:', feeErr);
+                            feeToast.update({ kind: 'error', sub: _formatTxError(feeErr), autoDismissMs: 6000 });
+                        }
+                    }
+                }
             } catch (e) {
                 console.error('Send failed:', e);
                 const friendly = _formatTxError(e);
@@ -2718,6 +2805,7 @@ function updateWalletUI() {
         const dropContent = document.getElementById('wallet-connect-content');
         if (dropContent) dropContent.style.display = 'none';
     }
+    if (_currentProfileAddress) _efpRefreshFollowButton(_currentProfileAddress);
 }
 
 // Open the wallet selection modal — uses EIP-6963, legacy injection, or mobile deep links
@@ -2940,13 +3028,33 @@ async function openEditRecordsModal() {
         { key: 'avatar',       label: 'Avatar URL',   value: p.avatar || '' },
     ];
 
-    body.innerHTML = fields.map(f => `
-        <div class="edit-field">
-            <label>${f.label}</label>
-            ${f.multiline
-                ? `<textarea data-key="${f.key}">${_escapeHtml(f.value)}</textarea>`
-                : `<input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}">`}
-        </div>`).join('');
+    const primaryBannerId = 'primary-name-banner';
+    body.innerHTML =
+        `<div id="${primaryBannerId}" class="primary-name-banner" style="display:none;"></div>` +
+        fields.map(f => {
+            if (f.key === 'avatar') {
+                return `
+                    <div class="edit-field">
+                        <label>${f.label}</label>
+                        <div class="avatar-field-row">
+                            <input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}" placeholder="ipfs://… or https://…" style="flex:1;">
+                            <button type="button" class="dropdown-button avatar-upload-btn" id="avatar-upload-btn">Upload</button>
+                        </div>
+                        <input type="file" id="avatar-upload-file" accept="image/*" style="display:none;">
+                        <div id="avatar-upload-status" class="crypto-status" style="font-size:0.78em;"></div>
+                    </div>`;
+            }
+            return `
+                <div class="edit-field">
+                    <label>${f.label}</label>
+                    ${f.multiline
+                        ? `<textarea data-key="${f.key}">${_escapeHtml(f.value)}</textarea>`
+                        : `<input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}">`}
+                </div>`;
+        }).join('');
+
+    _renderPrimaryNameBanner(primaryBannerId);
+    _wireAvatarUpload();
 
     const saveBtn = document.getElementById('edit-modal-save');
     if (saveBtn) saveBtn.onclick = () => _saveRecords(fields);
@@ -3022,6 +3130,162 @@ async function _saveRecords(originalFields) {
             errEl.textContent = _formatTxError(e);
         }
     }
+}
+
+// ─── ENS Primary Name (reverse record) ────────────────────────────────────────
+
+async function _getCurrentPrimaryName(userAddress) {
+    try {
+        const addrLower = userAddress.toLowerCase().replace(/^0x/, '');
+        const reverseNode = _ensNamehash(`${addrLower}.addr.reverse`);
+        const reverseNodeHex = _toHex(reverseNode);
+        // Call resolver for the reverse node
+        const resolverCall = await _ethCall('0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e', '0x0178b8bf' + reverseNodeHex);
+        if (!resolverCall || resolverCall.length < 42) return '';
+        const resolver = '0x' + resolverCall.slice(-40);
+        if (/^0x0+$/.test(resolver)) return '';
+        // name(bytes32) selector 0x691f3431
+        const nameCall = await _ethCall(resolver, '0x691f3431' + reverseNodeHex);
+        if (!nameCall || nameCall.length < 130) return '';
+        const lenHex = nameCall.slice(66, 130);
+        const strLen = parseInt(lenHex, 16);
+        if (!strLen) return '';
+        const strHex = nameCall.slice(130, 130 + strLen * 2);
+        let out = '';
+        for (let i = 0; i < strHex.length; i += 2) out += String.fromCharCode(parseInt(strHex.substr(i, 2), 16));
+        return out;
+    } catch (e) {
+        console.warn('Primary name lookup failed:', e);
+        return '';
+    }
+}
+
+async function _renderPrimaryNameBanner(bannerId) {
+    const banner = document.getElementById(bannerId);
+    if (!banner || !_connectedWallet) return;
+    const ensName = _currentProfileEnsName;
+    if (!ensName || ensName.endsWith('.base.eth')) return;
+
+    banner.style.display = 'block';
+    banner.innerHTML = '<span style="opacity:0.6;">Checking primary name…</span>';
+
+    const current = await _getCurrentPrimaryName(_connectedWallet.address);
+    if (current && current.toLowerCase() === ensName.toLowerCase()) {
+        banner.innerHTML = `<span class="primary-name-check">✓</span> <strong>${ensName}</strong> is your primary name`;
+        banner.classList.add('is-primary');
+        return;
+    }
+    banner.classList.remove('is-primary');
+    banner.innerHTML = `
+        <div class="primary-name-text">
+            ${current ? `Primary name: <strong>${current}</strong>` : 'No primary name set.'}
+        </div>
+        <button type="button" class="dropdown-button primary-name-btn">Set ${ensName} as primary</button>
+    `;
+    banner.querySelector('.primary-name-btn').onclick = () => _setPrimaryName(ensName, bannerId);
+}
+
+async function _setPrimaryName(ensName, bannerId) {
+    if (!_connectedWallet) { openWalletModal(); return; }
+    const banner = document.getElementById(bannerId);
+    const btn = banner?.querySelector('.primary-name-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Confirm in wallet…'; }
+
+    const toast = _txToast.add({ title: `Set primary: ${ensName}`, sub: 'Confirm in wallet\u2026' });
+    try {
+        await _ensureChain('0x1');
+        // setName(string) selector 0xc47f0027 + dynamic string encoding
+        const nameBytes = new TextEncoder().encode(ensName);
+        const nameHex = Array.from(nameBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const paddedNameHex = nameHex.padEnd(Math.ceil(nameHex.length / 64) * 64, '0');
+        const offsetHex = '0000000000000000000000000000000000000000000000000000000000000020';
+        const lenHex = nameBytes.length.toString(16).padStart(64, '0');
+        const calldata = '0xc47f0027' + offsetHex + lenHex + paddedNameHex;
+
+        const txHash = await _getWalletProvider().request({
+            method: 'eth_sendTransaction',
+            params: [{ from: _connectedWallet.address, to: ENS_REVERSE_REGISTRAR, data: calldata }]
+        });
+        toast.update({ kind: 'success', sub: 'Submitted — confirming', txHash, autoDismissMs: 10000 });
+        if (btn) btn.textContent = 'Submitted…';
+        setTimeout(() => _renderPrimaryNameBanner(bannerId), 8000);
+    } catch (e) {
+        console.error('Set primary failed:', e);
+        toast.update({ kind: 'error', sub: _formatTxError(e), autoDismissMs: 8000 });
+        if (btn) { btn.disabled = false; btn.textContent = `Set ${ensName} as primary`; }
+    }
+}
+
+// ─── Avatar upload to IPFS via Pinata ─────────────────────────────────────────
+
+const _PINATA_JWT_KEY = 'geocities-pinata-jwt';
+
+async function _pinFileToIPFS(file, jwt, name) {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'upload');
+    if (name) formData.append('pinataMetadata', JSON.stringify({ name }));
+    const resp = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}` },
+        body: formData
+    });
+    if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Pinata error ${resp.status}: ${err}`);
+    }
+    const data = await resp.json();
+    return data.IpfsHash;
+}
+
+function _wireAvatarUpload() {
+    const btn = document.getElementById('avatar-upload-btn');
+    const fileInput = document.getElementById('avatar-upload-file');
+    const statusEl = document.getElementById('avatar-upload-status');
+    const urlInput = document.querySelector('[data-key="avatar"]');
+    if (!btn || !fileInput || !urlInput) return;
+
+    const setStatus = (msg, isErr) => {
+        if (!statusEl) return;
+        statusEl.textContent = msg || '';
+        statusEl.style.color = isErr ? '#c62828' : '';
+    };
+
+    btn.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) { setStatus('Please choose an image file.', true); return; }
+        if (file.size > 5 * 1024 * 1024) { setStatus('Image must be under 5 MB.', true); return; }
+
+        let jwt = localStorage.getItem(_PINATA_JWT_KEY) || '';
+        if (!jwt) {
+            jwt = prompt('Paste your Pinata JWT (get one free at pinata.cloud). Stored only in this browser.') || '';
+            if (!jwt) { setStatus('Upload cancelled.'); return; }
+            try { localStorage.setItem(_PINATA_JWT_KEY, jwt); } catch {}
+        }
+
+        btn.disabled = true;
+        setStatus('Uploading to IPFS…');
+        try {
+            const cid = await _pinFileToIPFS(file, jwt, `geocities-avatar-${_currentProfileEnsName || 'unknown'}`);
+            urlInput.value = `ipfs://${cid}`;
+            urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+            setStatus(`Uploaded. Save changes to publish.`);
+        } catch (e) {
+            console.error('Avatar upload failed:', e);
+            const msg = String(e?.message || e);
+            if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
+                try { localStorage.removeItem(_PINATA_JWT_KEY); } catch {}
+                setStatus('Pinata auth failed. Click Upload again to re-enter your JWT.', true);
+            } else {
+                setStatus(msg, true);
+            }
+        } finally {
+            btn.disabled = false;
+            fileInput.value = '';
+        }
+    });
 }
 
 // Function to update the navigation bar based on the current view
