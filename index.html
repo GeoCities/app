@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
-        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com;
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://esm.sh https://cdn.esm.sh;
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' https://fonts.gstatic.com;
         img-src 'self' data: https: http:;
-        connect-src 'self' https://api.web3.bio https://api.ethfollow.xyz https://raw.githubusercontent.com https://cloudflare-eth.com https://api.pinata.cloud https://apiv5.paraswap.io;
+        connect-src 'self' https://api.web3.bio https://api.ethfollow.xyz https://raw.githubusercontent.com https://cloudflare-eth.com https://api.pinata.cloud https://apiv5.paraswap.io wss://relay.walletconnect.com wss://relay.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://pulse.walletconnect.org;
         object-src 'none';
         base-uri 'self';
         form-action 'none';

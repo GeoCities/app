@@ -96,6 +96,85 @@ window.addEventListener('eip6963:announceProvider', (event) => {
 });
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 
+// WalletConnect v2 config. One projectId covers every major wallet — QR on
+// desktop, native deep-link (managed by WalletConnect's own infra) on mobile.
+// Create a free projectId at https://cloud.reown.com and paste it below.
+// The WalletConnect row is hidden in the connect modal until this is set.
+const WALLETCONNECT_PROJECT_ID = ''; // ← fill in from https://cloud.reown.com
+const _WC_CDN = 'https://esm.sh/@walletconnect/ethereum-provider@2.17.0';
+
+let _wcProvider = null;
+let _wcProviderPromise = null;
+
+// Lazy-load @walletconnect/ethereum-provider. Only pays the ~400KB cost +
+// opens a relay WebSocket when the user actually clicks the WalletConnect row.
+async function _getWalletConnectProvider() {
+    if (_wcProvider) return _wcProvider;
+    if (!WALLETCONNECT_PROJECT_ID) {
+        throw new Error('WalletConnect projectId not set. Get one at cloud.reown.com and set WALLETCONNECT_PROJECT_ID in script.js.');
+    }
+    if (_wcProviderPromise) return _wcProviderPromise;
+    _wcProviderPromise = (async () => {
+        const mod = await import(_WC_CDN);
+        const EthereumProvider = mod.EthereumProvider || mod.default?.EthereumProvider || mod.default;
+        const provider = await EthereumProvider.init({
+            projectId: WALLETCONNECT_PROJECT_ID,
+            chains: [1],
+            showQrModal: true,
+            metadata: {
+                name: 'GeoCities',
+                description: 'ENS identity platform',
+                url: window.location.origin || window.location.href,
+                icons: [`${window.location.origin}/icons/icon-192x192.png`],
+            },
+            rpcMap: { 1: 'https://cloudflare-eth.com' },
+        });
+        _wcProvider = provider;
+        return provider;
+    })();
+    try {
+        return await _wcProviderPromise;
+    } finally {
+        _wcProviderPromise = null;
+    }
+}
+
+async function _connectWalletConnect() {
+    closeWalletModal();
+    try {
+        const provider = await _getWalletConnectProvider();
+        // If a previous session persisted in localStorage, accounts are already
+        // populated — skip the connect prompt and just resume.
+        if (!provider.session) {
+            await provider.connect();
+        }
+        const accounts = provider.accounts?.length
+            ? provider.accounts
+            : await provider.request({ method: 'eth_accounts' });
+        if (!accounts?.length) return;
+        _connectedWallet = {
+            address: accounts[0],
+            provider,
+            info: { name: 'WalletConnect', rdns: 'com.walletconnect' },
+        };
+        _attachProviderListeners(provider);
+        // Wallet-initiated disconnect — clear UI state
+        provider.on?.('disconnect', () => {
+            if (_connectedWallet?.provider === provider) {
+                _detachProviderListeners(provider);
+                _connectedWallet = null;
+                updateWalletUI();
+            }
+        });
+        updateWalletUI();
+    } catch (e) {
+        console.warn('WalletConnect connect failed:', e);
+        if (typeof e?.message === 'string' && e.message.includes('projectId not set')) {
+            alert(e.message);
+        }
+    }
+}
+
 
 let gridResizeHandler = null;
 let gridObserver = null;
@@ -2901,10 +2980,16 @@ function _renderWalletModalList() {
         }
     }
 
-    // 4. Mobile with no injected wallet — copy-URL fallback (safe, no third-party redirect).
-    //    Hand-rolled deep links were removed: stale URLs, can't verify the redirect lands on the
-    //    real wallet host, and they break when the dapp is served from an IPFS gateway.
-    //    WalletConnect/Reown is the right long-term path — tracked separately.
+    // 4. WalletConnect — universal path, covers every major wallet. Desktop gets
+    //    a QR code; mobile gets a wallet picker that uses WalletConnect's own
+    //    (maintained) deep-link scheme. Only shown when projectId is configured.
+    if (WALLETCONNECT_PROJECT_ID) {
+        const subtext = isMobile ? 'Open any wallet app' : 'Scan QR with any wallet';
+        makeRow('🔌', 'WalletConnect', subtext, 'Connect', _connectWalletConnect);
+    }
+
+    // 5. Mobile with no injected wallet — copy-URL fallback (always available as a
+    //    backup in case WalletConnect isn't configured or doesn't work for the user's wallet).
     if (isMobile && !inAppInfo && _eip6963Providers.length === 0) {
         makeRow('🔗', 'Copy page link', 'Paste into your wallet\'s built-in browser', 'Copy', async () => {
             try {
@@ -2929,7 +3014,7 @@ function _renderWalletModalList() {
         list.appendChild(note);
     }
 
-    // 5. Desktop install options
+    // 6. Desktop install options
     if (!isMobile) {
         const eip6963Rdns = new Set(_eip6963Providers.map(p => p.info.rdns));
         const hasLegacy = window.ethereum && knownWallets.find(k => k.test(window.ethereum));
@@ -2971,11 +3056,17 @@ function initWalletConnect() {
 
     const disconnectBtn = document.getElementById('wallet-disconnect-btn');
     if (disconnectBtn) {
-        disconnectBtn.addEventListener('click', () => {
+        disconnectBtn.addEventListener('click', async () => {
+            const wasWc = !!(_wcProvider && _connectedWallet?.provider === _wcProvider);
             _detachProviderListeners(_connectedWallet?.provider);
             _connectedWallet = null;
             updateWalletUI();
             document.getElementById('wallet-connect-content')?.classList.remove('show');
+            // End the WC session on the wallet side too — otherwise the wallet
+            // still thinks it's paired and won't prompt next time.
+            if (wasWc) {
+                try { await _wcProvider.disconnect(); } catch (e) { console.warn('WC disconnect:', e); }
+            }
         });
     }
 
