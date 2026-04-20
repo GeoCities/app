@@ -194,6 +194,62 @@ function _getWalletProvider() {
     return _connectedWallet?.provider || window.ethereum || null;
 }
 
+// ─── URL routing ─────────────────────────────────────────────────────────
+// Profiles are shareable: /vitalik.eth (preferred), /?name=vitalik.eth, and
+// /#/vitalik.eth all resolve to the same view. Path-based is the canonical
+// form; hash fallback exists because some IPFS gateways 404 on unknown paths
+// (see 404.html, which bounces the path into a hash the SPA can parse).
+function _parseRouteFromUrl() {
+    const qs = new URLSearchParams(location.search).get('name');
+    const hashPath = location.hash.replace(/^#\/?/, '');
+    const pathName = location.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
+    const raw = (qs || hashPath || pathName || '').trim();
+    if (!raw) return null;
+    let decoded;
+    try { decoded = decodeURIComponent(raw); } catch { decoded = raw; }
+    decoded = decoded.toLowerCase();
+    // Only route things that look like ENS/Basenames — the app serves no other paths.
+    if (!/^[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(eth|base\.eth)$/i.test(decoded)) return null;
+    return decoded;
+}
+
+function _pushProfileUrl(ensName) {
+    if (!ensName) return;
+    const next = '/' + ensName;
+    if (location.pathname === next && !location.hash && !location.search) return;
+    try { history.pushState(null, '', next); } catch {}
+}
+
+function _pushHomeUrl() {
+    if (location.pathname === '/' && !location.hash && !location.search) return;
+    try { history.pushState(null, '', '/'); } catch {}
+}
+
+function _showHomepage() {
+    const profilePage = document.getElementById('profile-page');
+    const container = document.querySelector('.container');
+    if (profilePage) profilePage.style.display = 'none';
+    if (container) container.style.display = 'block';
+    hideError();
+    hideLoading();
+    if (typeof updateNavBar === 'function') updateNavBar('home', false);
+    _currentProfileAddress = null;
+    _currentProfileEnsName = null;
+    _currentProfileData = null;
+}
+
+function _routeFromUrl() {
+    const name = _parseRouteFromUrl();
+    if (name) {
+        fetchProfile(name);
+    } else {
+        _showHomepage();
+    }
+}
+
+window.addEventListener('popstate', _routeFromUrl);
+window.addEventListener('hashchange', _routeFromUrl);
+
 // Prompt the wallet to switch networks before running a mainnet-only action
 // (ENS registrar, ParaSwap, EFP, resolver writes). Throws if the user rejects
 // so the caller can surface a clear inline error.
@@ -2262,16 +2318,19 @@ function displayProfile(data, ensName) {
     const numberRecords = document.querySelector('.profile-number-records');
     const headerImage = document.querySelector('.profile-header-image');
     const controlButtons = document.querySelectorAll('.control-button');
-    
+
+    // Sync URL — idempotent, so routing-driven loads don't double-push.
+    _pushProfileUrl(ensName);
+
     // Scroll to top of the page for better UX
     window.scrollTo({
         top: 0,
         behavior: 'smooth'
     });
-    
+
     // Store the current effect before clearing anything
     const currentEffect = effectSelect ? effectSelect.value : 'none';
-    
+
     // Hide homepage content and show profile page
     if (container) container.style.display = 'none';
     if (profilePage) profilePage.style.display = 'flex';
@@ -2341,6 +2400,7 @@ function displayProfile(data, ensName) {
                 <button class="profile-action-btn" id="profile-follow-btn">Follow</button>
                 <button class="profile-action-btn" id="profile-tip-btn">Tip</button>
                 <button class="profile-action-btn" id="profile-crypto-btn">Crypto</button>
+                <button class="profile-action-btn" id="profile-share-btn">Share</button>
                 <button class="profile-action-btn" id="profile-edit-btn">Edit Records</button>
             </div>`;
         profileActionsEl.style.display = 'block';
@@ -2371,6 +2431,31 @@ function displayProfile(data, ensName) {
             if (toInput) toInput.value = _currentProfileEnsName || _currentProfileAddress;
             if (amountInput && !amountInput.value) amountInput.value = '0.01';
             amountInput?.focus();
+        });
+
+        // Share: copy the canonical profile URL or invoke the OS share sheet on mobile
+        document.getElementById('profile-share-btn')?.addEventListener('click', async (e) => {
+            const url = `${location.origin}/${ensName}`;
+            const btn = e.currentTarget;
+            if (navigator.share) {
+                try {
+                    await navigator.share({ title: `${ensName} on GeoCities`, url });
+                    return;
+                } catch (err) {
+                    // User dismissed the share sheet — fall through to clipboard
+                    if (err?.name === 'AbortError') return;
+                }
+            }
+            try {
+                await navigator.clipboard.writeText(url);
+                const orig = btn.textContent;
+                btn.textContent = 'Link copied';
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            } catch (err) {
+                console.warn('Share/copy failed:', err);
+                btn.textContent = 'Copy failed';
+                setTimeout(() => { btn.textContent = 'Share'; }, 1500);
+            }
         });
 
         // Follow / Unfollow: toggle via EFP when wallet connected, else open efp.app
@@ -3524,7 +3609,10 @@ function displayUnregisteredProfile(ensName) {
     const numberRecords = document.querySelector('.profile-number-records');
     const headerImage = document.querySelector('.profile-header-image');
     const controlButtons = document.querySelectorAll('.control-button');
-    
+
+    // Sync URL so the "register this name" page is shareable too.
+    _pushProfileUrl(ensName);
+
     // Scroll to top of the page for better UX
     window.scrollTo({
         top: 0,
@@ -3871,10 +3959,12 @@ function setupNavLogoClickHandler() {
     const newNavLogo = navLogo.cloneNode(true);
     navLogo.parentNode.replaceChild(newNavLogo, navLogo);
     
-    // Add the click handler
+    // Add the click handler — navigate home via the router so the URL clears
+    // and the homepage shows without losing wallet state to a full reload.
     newNavLogo.addEventListener('click', (e) => {
         e.preventDefault();
-        window.location.reload(); // Refresh the page
+        _pushHomeUrl();
+        _showHomepage();
     });
 }
 
@@ -5221,4 +5311,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Ensure the nav bar is in the correct initial state (no profile-specific buttons)
     // This call is crucial to ensure homepage loads without profile buttons.
     updateNavBar('home', false);
+
+    // Route from the initial URL. If it's /vitalik.eth (or /#/vitalik.eth, or
+    // /?name=vitalik.eth), open that profile. Otherwise the homepage stays up.
+    _routeFromUrl();
 });
