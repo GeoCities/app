@@ -1503,8 +1503,9 @@ async function generateDownload() {
             currentEffect: effectSelect ? effectSelect.value : 'none'
         };
 
-        // Fetch the download-template.html file
-        const response = await fetch('download-template.html');
+        // Fetch the download-template.html file (absolute so it works when the
+        // page loaded from a /<ensname> shareable URL instead of /)
+        const response = await fetch('/download-template.html');
         if (!response.ok) {
             // If we can't fetch the template, use a fallback approach
             throw new Error('Could not load template file - using fallback');
@@ -5219,7 +5220,7 @@ async function _runIPFSDeploy() {
 }
 
 async function _buildDeployHTML() {
-    const resp = await fetch('download-template.html');
+    const resp = await fetch('/download-template.html');
     if (!resp.ok) throw new Error('Could not load template');
     let html = await resp.text();
 
