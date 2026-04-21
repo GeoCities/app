@@ -374,6 +374,7 @@
         </a>
         <div class="nav-buttons">
             <a href="https://efp.app/ENS_NAME_TITLE_PLACEHOLDER" target="_blank" rel="noopener noreferrer" id="follow-button" class="follow-button">Follow</a>
+            <button type="button" id="tip-button" class="follow-button" style="display:none;">💸 Tip</button>
             <div class="dropdown" id="coin-dropdown-container">
                 <button id="coin-dropdown-btn" class="dropdown-btn">🪙</button>
                 <div id="coin-dropdown-content" class="dropdown-content">
@@ -737,10 +738,49 @@
             loadProfile();
 
             const initialProfileAddressText = coinWalletAddressDiv.textContent.trim();
+            const tipButton = document.getElementById('tip-button');
             if (initialProfileAddressText === '[Wallet Address]' || initialProfileAddressText === 'PROFILE_ETH_ADDRESS_PLACEHOLDER' || initialProfileAddressText === '' || initialProfileAddressText === 'Address not found.') {
                 if (coinDropdownContainer) coinDropdownContainer.style.display = 'none';
+                if (tipButton) tipButton.style.display = 'none';
             } else {
                 if (coinDropdownContainer) coinDropdownContainer.style.display = 'inline-block';
+                if (tipButton) tipButton.style.display = 'inline-flex';
+            }
+
+            if (tipButton) {
+                tipButton.addEventListener('click', async () => {
+                    const address = coinWalletAddressDiv.textContent.trim();
+                    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+                        alert('No wallet address available to tip.');
+                        return;
+                    }
+                    if (!window.ethereum) {
+                        alert('Install MetaMask or open this site in your wallet\u2019s browser to send a tip.');
+                        return;
+                    }
+                    const raw = prompt('Tip amount in ETH:', '0.01');
+                    if (raw === null) return;
+                    const amount = parseFloat(raw);
+                    if (!(amount > 0)) { alert('Enter a positive amount.'); return; }
+                    // Convert ETH -> wei hex without pulling in ethers.
+                    const wei = BigInt(Math.round(amount * 1e18));
+                    const valueHex = '0x' + wei.toString(16);
+                    try {
+                        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                        const from = accounts[0];
+                        const txHash = await window.ethereum.request({
+                            method: 'eth_sendTransaction',
+                            params: [{ from, to: address, value: valueHex }]
+                        });
+                        tipButton.textContent = 'Sent \u2713';
+                        setTimeout(() => { tipButton.textContent = '\uD83D\uDCB8 Tip'; }, 4000);
+                        console.log('Tip tx:', txHash);
+                    } catch (err) {
+                        if (err && (err.code === 4001 || /reject/i.test(err.message || ''))) return;
+                        console.error('Tip failed:', err);
+                        alert('Tip failed: ' + (err && err.message || err));
+                    }
+                });
             }
 
             if (coinBtn && coinContent) {

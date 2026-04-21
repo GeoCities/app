@@ -582,6 +582,29 @@ h1#homepage-geocities {
     white-space: nowrap;
 }
 
+.wallet-modal-hint {
+    font-size: 0.72em;
+    opacity: 0.55;
+    text-align: center;
+    padding: 10px 16px 6px;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.wallet-modal-copy-fallback {
+    width: calc(100% - 32px);
+    margin: 8px 16px;
+    padding: 8px 10px;
+    background: transparent;
+    color: var(--primary-color);
+    border: 1px solid var(--border-color);
+    font-family: inherit;
+    font-size: 0.75em;
+    resize: none;
+    height: 54px;
+    word-break: break-all;
+}
+
 /* Edit Records modal body */
 .edit-modal-body {
     padding: 16px 20px;
@@ -590,6 +613,66 @@ h1#homepage-geocities {
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.primary-name-banner {
+    background: rgba(128, 128, 128, 0.08);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.88em;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.primary-name-banner.is-primary {
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
+}
+
+.primary-name-banner .primary-name-check {
+    font-weight: bold;
+}
+
+.primary-name-banner .primary-name-text {
+    opacity: 0.8;
+}
+
+.primary-name-banner .primary-name-btn {
+    align-self: flex-start;
+    font-size: 0.85em;
+}
+
+.avatar-field-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.avatar-field-row input {
+    min-width: 0;
+}
+
+.avatar-upload-btn {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.send-fee-optin {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.82em;
+    padding: 6px 2px;
+    opacity: 0.85;
+    cursor: pointer;
+    user-select: none;
+}
+
+.send-fee-optin input[type="checkbox"] {
+    cursor: pointer;
 }
 
 .edit-field {
@@ -1426,6 +1509,17 @@ h1#homepage-geocities {
     opacity: 0.5;
 }
 
+.profile-action-btn[data-following="true"] {
+    color: var(--accent-color, var(--primary-color));
+    opacity: 0.85;
+}
+
+.profile-action-btn[data-following="true"]:hover::after {
+    content: " · Unfollow";
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
 /* Inline crypto panel — collapsible, sits between action bar and records */
 .profile-crypto-panel {
     display: none;
@@ -1574,11 +1668,46 @@ h1#homepage-geocities {
     width: 100%;
 }
 
+.crypto-disclosure {
+    font-size: 0.68em;
+    text-align: center;
+    opacity: 0.45;
+    padding-top: 6px;
+    width: 100%;
+}
+
 /* Register modal */
 .register-availability {
     font-size: 0.85em;
     padding: 6px 0;
     text-align: center;
+}
+
+.register-availability-inline {
+    font-size: 0.9em;
+    text-align: center;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: rgba(128, 128, 128, 0.08);
+    opacity: 0.75;
+}
+
+.register-availability-inline.available {
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
+    opacity: 1;
+}
+
+.register-availability-inline.unavailable {
+    background: rgba(228, 68, 68, 0.12);
+    color: #c62828;
+    opacity: 1;
+}
+
+.register-availability-inline .avail-dot {
+    font-weight: bold;
+    margin-right: 4px;
 }
 
 .register-price {
@@ -1698,6 +1827,53 @@ h1#homepage-geocities {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Transaction toast stack — survives modal close so users see tx state end-to-end */
+#tx-toast-stack {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+    z-index: 9999;
+    pointer-events: none;
+    max-width: 320px;
+}
+.tx-toast {
+    pointer-events: auto;
+    background: var(--background-color, #000);
+    color: var(--primary-color, #fff);
+    border: 1px solid var(--border-color, #fff);
+    padding: 10px 12px;
+    font-size: 0.78em;
+    line-height: 1.35;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 180ms ease, transform 180ms ease;
+}
+.tx-toast.show { opacity: 1; transform: translateY(0); }
+.tx-toast .tx-toast-title { font-weight: 600; margin-bottom: 2px; }
+.tx-toast .tx-toast-sub { opacity: 0.7; word-break: break-all; }
+.tx-toast .tx-toast-sub a { color: inherit; text-decoration: underline; }
+.tx-toast.tx-error { border-color: #e44; }
+.tx-toast.tx-success { border-color: #4a4; }
+.tx-toast .tx-toast-close {
+    float: right;
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    opacity: 0.5;
+    font-size: 1.1em;
+    line-height: 1;
+    padding: 0 0 0 8px;
+}
+.tx-toast .tx-toast-close:hover { opacity: 1; }
+@media (max-width: 560px) {
+    #tx-toast-stack { left: 12px; right: 12px; max-width: none; }
 }
 
 /* Responsive adjustments */

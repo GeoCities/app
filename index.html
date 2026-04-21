@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
-        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com;
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://esm.sh https://cdn.esm.sh;
         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
         font-src 'self' https://fonts.gstatic.com;
         img-src 'self' data: https: http:;
-        connect-src 'self' https://api.web3.bio https://api.ethfollow.xyz https://raw.githubusercontent.com https://cloudflare-eth.com https://api.pinata.cloud https://apiv5.paraswap.io;
+        connect-src 'self' https://api.web3.bio https://api.ethfollow.xyz https://raw.githubusercontent.com https://cloudflare-eth.com https://api.pinata.cloud https://apiv5.paraswap.io wss://relay.walletconnect.com wss://relay.walletconnect.org https://*.walletconnect.com https://*.walletconnect.org https://pulse.walletconnect.org;
         object-src 'none';
         base-uri 'self';
         form-action 'none';
@@ -17,12 +17,12 @@
     <title>GeoCities</title>
     <link rel="icon" id="favicon" href="" type="image/x-icon">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Georgia&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="manifest" href="/manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="GeoCities">
-    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+    <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
 </head>
 <body>
     <nav class="nav-bar">
@@ -96,6 +96,10 @@
                             </select>
                         </div>
                     </div>
+                    <label class="send-fee-optin">
+                        <input type="checkbox" id="send-fee-optin" checked>
+                        <span>Add 1% to support GeoCities</span>
+                    </label>
                     <button id="send-submit-btn" class="dropdown-button">Send</button>
                     <div id="send-status" class="crypto-status"></div>
                 </div>
@@ -128,6 +132,7 @@
                     <button id="swap-quote-btn" class="dropdown-button">Get Quote</button>
                     <button id="swap-exec-btn" class="dropdown-button" style="display:none;">Swap</button>
                     <div id="swap-status" class="crypto-status"></div>
+                    <div class="crypto-disclosure">Swap powered by ParaSwap. A small fee supports GeoCities.</div>
                 </div>
             </div>
             <div class="profile-records">
@@ -214,6 +219,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
-    <script src="script.js"></script>
+    <script src="/script.js"></script>
 </body>
 </html>

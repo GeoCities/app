@@ -51,6 +51,22 @@ const ENS_NAMES = [...PRIORITY_ENS_NAMES, ...OTHER_ENS_NAMES];
 // ENS on-chain contract addresses
 const ENS_REGISTRAR = '0x253553366Da8546fC250F225fe3d25d0C782303b';
 const ENS_PUBLIC_RESOLVER = '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63';
+const ENS_REVERSE_REGISTRAR = '0xa58E81fe9b61B5c3fE2AFD33CF304c454AbFc7Cb';
+
+// Optional 1% protocol fee on tips — destination resolves to geocities.eth on-chain
+// or the mapped address below. Leave empty to disable the fee entirely.
+const GEOCITIES_FEE_RECIPIENT = 'geocities.eth';
+const GEOCITIES_FEE_BPS = 100; // 1.00%
+
+function _formatFeeAmount(amountStr, tokenSymbol) {
+    const amt = parseFloat(amountStr);
+    if (!isFinite(amt) || amt <= 0) return null;
+    const fee = amt * (GEOCITIES_FEE_BPS / 10000);
+    const decimals = (tokenSymbol === 'USDC' || tokenSymbol === 'USDT') ? 6 : 8;
+    const rounded = parseFloat(fee.toFixed(decimals));
+    if (rounded <= 0) return null;
+    return String(rounded);
+}
 
 // Token definitions (symbol → address + decimals)
 const TOKENS = {
@@ -62,6 +78,13 @@ const TOKENS = {
     ENS:  { symbol: 'ENS',  address: '0xC18360217D8F7Ab5e7c516566761Ea12Ce7F9D72', decimals: 18 },
 };
 const PARASWAP_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+// ParaSwap Partner Program revenue share. `partner` identifies GeoCities in the
+// dashboard; `partnerFeeBps` + `partnerAddress` split the spread to treasury.
+// Set PARASWAP_PARTNER_ADDRESS once enrolled — until then the fee is zero and
+// the partner string is informational only.
+const PARASWAP_PARTNER = 'geocities';
+const PARASWAP_PARTNER_FEE_BPS = 50; // 0.5%
+const PARASWAP_PARTNER_ADDRESS = ''; // fill in after partner enrollment
 let _lastSwapQuote = null;
 
 // EIP-6963 multi-wallet discovery — collected at startup
@@ -73,6 +96,85 @@ window.addEventListener('eip6963:announceProvider', (event) => {
 });
 window.dispatchEvent(new Event('eip6963:requestProvider'));
 
+// WalletConnect v2 config. One projectId covers every major wallet — QR on
+// desktop, native deep-link (managed by WalletConnect's own infra) on mobile.
+// Create a free projectId at https://cloud.reown.com and paste it below.
+// The WalletConnect row is hidden in the connect modal until this is set.
+const WALLETCONNECT_PROJECT_ID = ''; // ← fill in from https://cloud.reown.com
+const _WC_CDN = 'https://esm.sh/@walletconnect/ethereum-provider@2.17.0';
+
+let _wcProvider = null;
+let _wcProviderPromise = null;
+
+// Lazy-load @walletconnect/ethereum-provider. Only pays the ~400KB cost +
+// opens a relay WebSocket when the user actually clicks the WalletConnect row.
+async function _getWalletConnectProvider() {
+    if (_wcProvider) return _wcProvider;
+    if (!WALLETCONNECT_PROJECT_ID) {
+        throw new Error('WalletConnect projectId not set. Get one at cloud.reown.com and set WALLETCONNECT_PROJECT_ID in script.js.');
+    }
+    if (_wcProviderPromise) return _wcProviderPromise;
+    _wcProviderPromise = (async () => {
+        const mod = await import(_WC_CDN);
+        const EthereumProvider = mod.EthereumProvider || mod.default?.EthereumProvider || mod.default;
+        const provider = await EthereumProvider.init({
+            projectId: WALLETCONNECT_PROJECT_ID,
+            chains: [1],
+            showQrModal: true,
+            metadata: {
+                name: 'GeoCities',
+                description: 'ENS identity platform',
+                url: window.location.origin || window.location.href,
+                icons: [`${window.location.origin}/icons/icon-192x192.png`],
+            },
+            rpcMap: { 1: 'https://cloudflare-eth.com' },
+        });
+        _wcProvider = provider;
+        return provider;
+    })();
+    try {
+        return await _wcProviderPromise;
+    } finally {
+        _wcProviderPromise = null;
+    }
+}
+
+async function _connectWalletConnect() {
+    closeWalletModal();
+    try {
+        const provider = await _getWalletConnectProvider();
+        // If a previous session persisted in localStorage, accounts are already
+        // populated — skip the connect prompt and just resume.
+        if (!provider.session) {
+            await provider.connect();
+        }
+        const accounts = provider.accounts?.length
+            ? provider.accounts
+            : await provider.request({ method: 'eth_accounts' });
+        if (!accounts?.length) return;
+        _connectedWallet = {
+            address: accounts[0],
+            provider,
+            info: { name: 'WalletConnect', rdns: 'com.walletconnect' },
+        };
+        _attachProviderListeners(provider);
+        // Wallet-initiated disconnect — clear UI state
+        provider.on?.('disconnect', () => {
+            if (_connectedWallet?.provider === provider) {
+                _detachProviderListeners(provider);
+                _connectedWallet = null;
+                updateWalletUI();
+            }
+        });
+        updateWalletUI();
+    } catch (e) {
+        console.warn('WalletConnect connect failed:', e);
+        if (typeof e?.message === 'string' && e.message.includes('projectId not set')) {
+            alert(e.message);
+        }
+    }
+}
+
 
 let gridResizeHandler = null;
 let gridObserver = null;
@@ -81,7 +183,181 @@ let gridObserver = null;
 let _currentProfileAddress = null;
 let _currentProfileEnsName = null;
 let _currentProfileData = null;
+// _connectedWallet: null when disconnected, else { address, provider, info }.
+// `provider` is the exact EIP-1193 provider the user picked in the modal —
+// critical when multiple wallets inject into window.ethereum.
 let _connectedWallet = null;
+
+// Return the EIP-1193 provider to route requests through. Prefers the user's
+// chosen provider; falls back to window.ethereum for pre-connect reads.
+function _getWalletProvider() {
+    return _connectedWallet?.provider || window.ethereum || null;
+}
+
+// ─── URL routing ─────────────────────────────────────────────────────────
+// Profiles are shareable: /vitalik.eth (preferred), /?name=vitalik.eth, and
+// /#/vitalik.eth all resolve to the same view. Path-based is the canonical
+// form; hash fallback exists because some IPFS gateways 404 on unknown paths
+// (see 404.html, which bounces the path into a hash the SPA can parse).
+function _parseRouteFromUrl() {
+    const qs = new URLSearchParams(location.search).get('name');
+    const hashPath = location.hash.replace(/^#\/?/, '');
+    const pathName = location.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
+    const raw = (qs || hashPath || pathName || '').trim();
+    if (!raw) return null;
+    let decoded;
+    try { decoded = decodeURIComponent(raw); } catch { decoded = raw; }
+    decoded = decoded.toLowerCase();
+    // Only route things that look like ENS/Basenames — the app serves no other paths.
+    if (!/^[a-z0-9_-]+(\.[a-z0-9_-]+)*\.(eth|base\.eth)$/i.test(decoded)) return null;
+    return decoded;
+}
+
+function _pushProfileUrl(ensName) {
+    if (!ensName) return;
+    const next = '/' + ensName;
+    if (location.pathname === next && !location.hash && !location.search) return;
+    try { history.pushState(null, '', next); } catch {}
+}
+
+function _pushHomeUrl() {
+    if (location.pathname === '/' && !location.hash && !location.search) return;
+    try { history.pushState(null, '', '/'); } catch {}
+}
+
+function _showHomepage() {
+    const profilePage = document.getElementById('profile-page');
+    const container = document.querySelector('.container');
+    if (profilePage) profilePage.style.display = 'none';
+    if (container) container.style.display = 'block';
+    hideError();
+    hideLoading();
+    if (typeof updateNavBar === 'function') updateNavBar('home', false);
+    _currentProfileAddress = null;
+    _currentProfileEnsName = null;
+    _currentProfileData = null;
+}
+
+function _routeFromUrl() {
+    const name = _parseRouteFromUrl();
+    if (name) {
+        fetchProfile(name);
+    } else {
+        _showHomepage();
+    }
+}
+
+window.addEventListener('popstate', _routeFromUrl);
+window.addEventListener('hashchange', _routeFromUrl);
+
+// Prompt the wallet to switch networks before running a mainnet-only action
+// (ENS registrar, ParaSwap, EFP, resolver writes). Throws if the user rejects
+// so the caller can surface a clear inline error.
+async function _ensureChain(chainIdHex = '0x1') {
+    const provider = _getWalletProvider();
+    if (!provider) throw new Error('No wallet connected');
+    const current = await provider.request({ method: 'eth_chainId' });
+    if (current === chainIdHex) return;
+    try {
+        await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
+    } catch (err) {
+        // 4902: chain not added to the wallet yet. Only mainnet is required
+        // today, which every wallet ships with — so surface a real error.
+        if (err?.code === 4902) throw new Error('Add Ethereum mainnet to your wallet and try again.');
+        throw err;
+    }
+}
+
+// Turn raw wallet/RPC errors into strings a human would write. Unknown errors
+// fall back to a generic line — the raw message still goes to console.error.
+function _formatTxError(err) {
+    if (!err) return 'Something went wrong.';
+    const code = err.code ?? err.error?.code;
+    const msg = (err.shortMessage || err.reason || err.error?.message || err.message || String(err)).toLowerCase();
+    if (code === 4001 || code === 'ACTION_REJECTED' || msg.includes('user rejected') || msg.includes('user denied')) {
+        return 'You cancelled the transaction.';
+    }
+    if (code === 4902 || msg.includes('unrecognized chain')) return 'This network isn\u2019t in your wallet yet — approve the prompt to add it.';
+    if (msg.includes('insufficient funds')) return 'Not enough ETH to cover gas + amount.';
+    if (msg.includes('insufficient allowance')) return 'Token approval missing — try again to approve first.';
+    if (msg.includes('nonce too low') || msg.includes('replacement') || msg.includes('underpriced')) {
+        return 'A pending tx is still confirming — wait a moment and retry.';
+    }
+    if (msg.includes('network') && msg.includes('error')) return 'Network hiccup — try again.';
+    if (msg.includes('missing revert data') || msg.includes('cannot estimate gas')) return 'Transaction would fail — double-check the amount and try again.';
+    if (msg.includes('nameunavailable') || msg.includes('already registered')) return 'That name is already registered.';
+    if (msg.includes('commitmenttoonew') || msg.includes('commitment too new')) return 'Wait a few more seconds before registering.';
+    if (msg.includes('commitmenttooold') || msg.includes('commitment too old')) return 'Commitment expired — start the registration over.';
+    const fallback = err.shortMessage || err.reason || err.message;
+    return fallback ? String(fallback).slice(0, 140) : 'Something went wrong.';
+}
+
+// ─── Transaction toast stack ────────────────────────────────────────────────
+// Global, per-tx visual feedback that survives modal close. Each tx-initiating
+// action opens a toast, updates it on receipt, and auto-dismisses on success.
+const _txToast = (() => {
+    let stack = null;
+    let seq = 0;
+    const ensureStack = () => {
+        if (stack) return stack;
+        stack = document.getElementById('tx-toast-stack');
+        if (!stack) {
+            stack = document.createElement('div');
+            stack.id = 'tx-toast-stack';
+            document.body.appendChild(stack);
+        }
+        return stack;
+    };
+    const explorerUrl = (hash) => `https://etherscan.io/tx/${hash}`;
+    const add = ({ title = 'Transaction', sub = 'Waiting for wallet…' } = {}) => {
+        const root = ensureStack();
+        const el = document.createElement('div');
+        el.className = 'tx-toast';
+        el.innerHTML = `
+            <button class="tx-toast-close" aria-label="Dismiss">\u00d7</button>
+            <div class="tx-toast-title"></div>
+            <div class="tx-toast-sub"></div>`;
+        const titleEl = el.querySelector('.tx-toast-title');
+        const subEl = el.querySelector('.tx-toast-sub');
+        titleEl.textContent = title;
+        subEl.textContent = sub;
+        el.querySelector('.tx-toast-close').addEventListener('click', () => dismiss());
+        root.appendChild(el);
+        requestAnimationFrame(() => el.classList.add('show'));
+        const id = ++seq;
+        let autoDismiss = null;
+        const clearAuto = () => { if (autoDismiss) { clearTimeout(autoDismiss); autoDismiss = null; } };
+        const dismiss = () => {
+            clearAuto();
+            el.classList.remove('show');
+            setTimeout(() => el.remove(), 200);
+        };
+        const update = (patch = {}) => {
+            if (patch.title) titleEl.textContent = patch.title;
+            if (patch.sub !== undefined) {
+                if (patch.txHash) {
+                    const short = `${patch.txHash.slice(0,10)}\u2026`;
+                    subEl.innerHTML = `${_escapeHtmlText(patch.sub)} <a href="${explorerUrl(patch.txHash)}" target="_blank" rel="noopener noreferrer">${short}</a>`;
+                } else {
+                    subEl.textContent = patch.sub;
+                }
+            } else if (patch.txHash) {
+                const short = `${patch.txHash.slice(0,10)}\u2026`;
+                subEl.innerHTML = `<a href="${explorerUrl(patch.txHash)}" target="_blank" rel="noopener noreferrer">${short}</a>`;
+            }
+            if (patch.kind === 'error') { el.classList.remove('tx-success'); el.classList.add('tx-error'); }
+            else if (patch.kind === 'success') { el.classList.remove('tx-error'); el.classList.add('tx-success'); }
+            if (patch.autoDismissMs) {
+                clearAuto();
+                autoDismiss = setTimeout(dismiss, patch.autoDismissMs);
+            }
+        };
+        return { id, update, dismiss };
+    };
+    return { add };
+})();
+
+function _escapeHtmlText(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
 
@@ -1227,8 +1503,9 @@ async function generateDownload() {
             currentEffect: effectSelect ? effectSelect.value : 'none'
         };
 
-        // Fetch the download-template.html file
-        const response = await fetch('download-template.html');
+        // Fetch the download-template.html file (absolute so it works when the
+        // page loaded from a /<ensname> shareable URL instead of /)
+        const response = await fetch('/download-template.html');
         if (!response.ok) {
             // If we can't fetch the template, use a fallback approach
             throw new Error('Could not load template file - using fallback');
@@ -2042,16 +2319,19 @@ function displayProfile(data, ensName) {
     const numberRecords = document.querySelector('.profile-number-records');
     const headerImage = document.querySelector('.profile-header-image');
     const controlButtons = document.querySelectorAll('.control-button');
-    
+
+    // Sync URL — idempotent, so routing-driven loads don't double-push.
+    _pushProfileUrl(ensName);
+
     // Scroll to top of the page for better UX
     window.scrollTo({
         top: 0,
         behavior: 'smooth'
     });
-    
+
     // Store the current effect before clearing anything
     const currentEffect = effectSelect ? effectSelect.value : 'none';
-    
+
     // Hide homepage content and show profile page
     if (container) container.style.display = 'none';
     if (profilePage) profilePage.style.display = 'flex';
@@ -2119,7 +2399,9 @@ function displayProfile(data, ensName) {
         profileActionsEl.innerHTML = `
             <div class="profile-actions-row">
                 <button class="profile-action-btn" id="profile-follow-btn">Follow</button>
+                <button class="profile-action-btn" id="profile-tip-btn">Tip</button>
                 <button class="profile-action-btn" id="profile-crypto-btn">Crypto</button>
+                <button class="profile-action-btn" id="profile-share-btn">Share</button>
                 <button class="profile-action-btn" id="profile-edit-btn">Edit Records</button>
             </div>`;
         profileActionsEl.style.display = 'block';
@@ -2133,14 +2415,68 @@ function displayProfile(data, ensName) {
             if (isOpen) populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
         });
 
-        // Follow: on-chain via EFP when wallet connected, else open efp.app
-        document.getElementById('profile-follow-btn')?.addEventListener('click', () => {
-            if (_connectedWallet) {
-                _efpFollow(_currentProfileAddress, _currentProfileEnsName);
-            } else {
-                window.open(`https://efp.app/${ensName}`, '_blank', 'noopener,noreferrer');
+        // Tip: open Crypto panel pre-switched to Send, prefill recipient.
+        document.getElementById('profile-tip-btn')?.addEventListener('click', () => {
+            if (!_connectedWallet) { openWalletModal(); return; }
+            if (!_currentProfileAddress) return;
+            const panel = document.querySelector('.profile-crypto-panel');
+            if (panel && !panel.classList.contains('open')) {
+                panel.classList.add('open');
+                document.getElementById('profile-crypto-btn')?.classList.add('active');
+                populateCryptoPanel(_currentProfileAddress, _currentProfileEnsName);
+            }
+            panel?.querySelectorAll('.crypto-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'send'));
+            panel?.querySelectorAll('.crypto-tab-body').forEach(b => b.classList.toggle('active', b.id === 'crypto-send-body'));
+            const toInput = document.getElementById('send-to');
+            const amountInput = document.getElementById('send-amount');
+            if (toInput) toInput.value = _currentProfileEnsName || _currentProfileAddress;
+            if (amountInput && !amountInput.value) amountInput.value = '0.01';
+            amountInput?.focus();
+        });
+
+        // Share: copy the canonical profile URL or invoke the OS share sheet on mobile
+        document.getElementById('profile-share-btn')?.addEventListener('click', async (e) => {
+            const url = `${location.origin}/${ensName}`;
+            const btn = e.currentTarget;
+            if (navigator.share) {
+                try {
+                    await navigator.share({ title: `${ensName} on GeoCities`, url });
+                    return;
+                } catch (err) {
+                    // User dismissed the share sheet — fall through to clipboard
+                    if (err?.name === 'AbortError') return;
+                }
+            }
+            try {
+                await navigator.clipboard.writeText(url);
+                const orig = btn.textContent;
+                btn.textContent = 'Link copied';
+                setTimeout(() => { btn.textContent = orig; }, 1500);
+            } catch (err) {
+                console.warn('Share/copy failed:', err);
+                btn.textContent = 'Copy failed';
+                setTimeout(() => { btn.textContent = 'Share'; }, 1500);
             }
         });
+
+        // Follow / Unfollow: toggle via EFP when wallet connected, else open efp.app
+        document.getElementById('profile-follow-btn')?.addEventListener('click', (e) => {
+            if (!_connectedWallet) {
+                window.open(`https://efp.app/${ensName}`, '_blank', 'noopener,noreferrer');
+                return;
+            }
+            const btn = e.currentTarget;
+            if (btn.dataset.following === 'true') {
+                _efpUnfollow(_currentProfileAddress, _currentProfileEnsName);
+            } else {
+                _efpFollow(_currentProfileAddress, _currentProfileEnsName);
+            }
+        });
+
+        // Reflect existing follow state if wallet already connected
+        if (_connectedWallet && _currentProfileAddress) {
+            _efpRefreshFollowButton(_currentProfileAddress);
+        }
 
         // Edit Records: inline modal when wallet connected, else link to ENS app
         document.getElementById('profile-edit-btn')?.addEventListener('click', () => {
@@ -2357,66 +2693,121 @@ function normalizeUrl(url) {
 }
 
 // Populate the inline crypto panel with QR code, address, and explorer link
-// EFP on-chain follow
+// EFP on-chain follow/unfollow
 // Contracts (Ethereum mainnet):
 //   AccountMetadata: 0x5289fE5daBC021D02FDDf23d4a4DF96F4E0F17EF
 //   ListRegistry:    0x0E688f5DCa4a0a4729946ACbC44C792341714e08
 //   ListRecords:     0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33
-async function _efpFollow(targetAddress, targetEnsName) {
+
+async function _efpGetPrimaryListLocation(userAddress) {
+    const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${userAddress}/primary-list`);
+    if (!listResp.ok) return null;
+    const listData = await listResp.json();
+    const tokenId = listData.primary_list ?? listData.token_id ?? listData.list;
+    if (tokenId === null || tokenId === undefined) return null;
+
+    let listContract = '0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33';
+    let slot = BigInt(tokenId);
+    const locResp = await fetch(`https://api.ethfollow.xyz/api/v1/lists/${tokenId}/storage-location`).catch(() => null);
+    if (locResp && locResp.ok) {
+        const loc = await locResp.json();
+        const nonce = loc.nonce ?? loc.slot ?? loc.list_storage_location?.nonce;
+        const addr = loc.contract_address ?? loc.list_storage_location?.contract_address;
+        if (nonce !== undefined) slot = BigInt(nonce);
+        if (addr) listContract = addr;
+    }
+    return { tokenId, listContract, slot };
+}
+
+async function _efpCheckFollows(userAddress, targetAddress) {
+    try {
+        const resp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${userAddress}/following/${targetAddress}`);
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        return !!(data?.following ?? data?.is_following ?? data?.result);
+    } catch { return false; }
+}
+
+async function _efpApplyListOp(opcode, targetAddress, targetEnsName) {
+    // opcode 0x01 = add, 0x02 = remove
     const followBtn = document.getElementById('profile-follow-btn');
     const setFollowBtn = (text, disabled) => {
         if (followBtn) { followBtn.textContent = text; followBtn.disabled = !!disabled; }
     };
-    setFollowBtn('Following…', true);
+    const isAdd = opcode === 0x01;
+    setFollowBtn(isAdd ? 'Following…' : 'Unfollowing…', true);
 
     try {
-        // 1. Get connected user's primary list from EFP API
-        const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet}/primary-list`);
-        if (!listResp.ok) throw new Error('no primary list');
-        const listData = await listResp.json();
-
-        // Extract token ID and storage location info from API response
-        const tokenId = listData.primary_list || listData.token_id || listData.list;
-        if (!tokenId && tokenId !== 0) throw new Error('no primary list token');
-
-        // 2. Get list storage location (chainId, contract, nonce/slot)
-        // Try EFP API first, then fallback to contract call
-        let listContract = '0x41Aa48Ef3c0446b46a5b1cc6337FF3d3716E2A33';
-        let slot = BigInt(tokenId);
-
-        const locResp = await fetch(`https://api.ethfollow.xyz/api/v1/lists/${tokenId}/storage-location`).catch(() => null);
-        if (locResp && locResp.ok) {
-            const loc = await locResp.json();
-            const nonce = loc.nonce ?? loc.slot ?? loc.list_storage_location?.nonce;
-            const addr = loc.contract_address ?? loc.list_storage_location?.contract_address;
-            if (nonce !== undefined) slot = BigInt(nonce);
-            if (addr) listContract = addr;
+        if (!_connectedWallet) throw new Error('No wallet connected');
+        await _ensureChain('0x1');
+        const location = await _efpGetPrimaryListLocation(_connectedWallet.address);
+        if (!location) {
+            // No list yet — offer to create one via efp.app (on-chain mint is non-trivial)
+            setFollowBtn('Follow', false);
+            _txToast.add({
+                title: 'No EFP list yet',
+                sub: 'Create your list on efp.app, then come back to follow.',
+                kind: 'error',
+                autoDismissMs: 8000
+            });
+            window.open('https://efp.app/', '_blank', 'noopener,noreferrer');
+            return;
         }
 
-        // 3. Build the follow list operation bytes
-        // Format: version(1) || opcode=add(1) || record_version(1) || record_type=address(1) || address(20)
+        const opHex = isAdd ? '01' : '02';
         const addrHex = (targetAddress || '0x0000000000000000000000000000000000000000').replace('0x', '').padStart(40, '0');
-        const opBytes = '01010101' + addrHex; // 24 bytes
+        const opBytes = '01' + opHex + '0101' + addrHex; // 24 bytes
         const opPadded = opBytes.padEnd(64, '0');
 
-        // 4. ABI encode applyListOp(uint256 slot, bytes op) — selector 0x5aaf83db
-        const slotHex = slot.toString(16).padStart(64, '0');
+        const slotHex = location.slot.toString(16).padStart(64, '0');
         const bytesOffset = '0000000000000000000000000000000000000000000000000000000000000040';
-        const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
+        const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018';
         const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
 
-        await window.ethereum.request({
-            method: 'eth_sendTransaction',
-            params: [{ from: _connectedWallet, to: listContract, data: calldata }]
-        });
+        const actionLabel = isAdd ? 'Follow' : 'Unfollow';
+        const toast = _txToast.add({ title: `${actionLabel} ${targetEnsName || targetAddress}`, sub: 'Confirm in wallet\u2026' });
+        try {
+            const txHash = await _getWalletProvider().request({
+                method: 'eth_sendTransaction',
+                params: [{ from: _connectedWallet.address, to: location.listContract, data: calldata }]
+            });
+            toast.update({ kind: 'success', sub: 'Submitted', txHash, autoDismissMs: 10000 });
+        } catch (txErr) {
+            toast.update({ kind: 'error', sub: _formatTxError(txErr), autoDismissMs: 8000 });
+            throw txErr;
+        }
 
-        setFollowBtn('Following!', false);
-        setTimeout(() => setFollowBtn('Follow', false), 3000);
+        if (isAdd) {
+            setFollowBtn('Following', false);
+            if (followBtn) followBtn.dataset.following = 'true';
+        } else {
+            setFollowBtn('Follow', false);
+            if (followBtn) followBtn.dataset.following = 'false';
+        }
     } catch (e) {
-        console.warn('EFP on-chain follow failed, opening efp.app:', e);
-        setFollowBtn('Follow', false);
-        window.open(`https://efp.app/${targetEnsName || targetAddress}`, '_blank', 'noopener,noreferrer');
+        console.warn('EFP on-chain op failed:', e);
+        setFollowBtn(isAdd ? 'Follow' : 'Following', false);
     }
+}
+
+async function _efpFollow(targetAddress, targetEnsName) {
+    return _efpApplyListOp(0x01, targetAddress, targetEnsName);
+}
+
+async function _efpUnfollow(targetAddress, targetEnsName) {
+    return _efpApplyListOp(0x02, targetAddress, targetEnsName);
+}
+
+async function _efpRefreshFollowButton(targetAddress) {
+    const followBtn = document.getElementById('profile-follow-btn');
+    if (!followBtn || !_connectedWallet || !targetAddress) return;
+    if (_connectedWallet.address.toLowerCase() === targetAddress.toLowerCase()) {
+        followBtn.style.display = 'none';
+        return;
+    }
+    const isFollowing = await _efpCheckFollows(_connectedWallet.address, targetAddress);
+    followBtn.dataset.following = isFollowing ? 'true' : 'false';
+    followBtn.textContent = isFollowing ? 'Following' : 'Follow';
 }
 
 function populateCryptoPanel(address, ensName) {
@@ -2482,14 +2873,34 @@ function populateCryptoPanel(address, ensName) {
             const toInput = document.getElementById('send-to')?.value?.trim();
             const amount = document.getElementById('send-amount')?.value?.trim();
             const token = document.getElementById('send-token')?.value;
+            const feeOptIn = document.getElementById('send-fee-optin')?.checked;
             if (!toInput || !amount) { if (sendStatus) sendStatus.textContent = 'Please fill in all fields.'; return; }
             sendBtn.disabled = true;
             if (sendStatus) sendStatus.textContent = 'Sending…';
+            const toast = _txToast.add({ title: `Send ${amount} ${token}`, sub: 'Confirm in wallet…' });
             try {
                 const txHash = await sendToken(toInput, amount, token);
                 if (sendStatus) sendStatus.textContent = `Sent! Tx: ${txHash.slice(0,10)}…`;
+                toast.update({ kind: 'success', sub: 'Confirmed', txHash, autoDismissMs: 10000 });
+
+                if (feeOptIn && GEOCITIES_FEE_RECIPIENT) {
+                    const feeAmount = _formatFeeAmount(amount, token);
+                    if (feeAmount) {
+                        const feeToast = _txToast.add({ title: `Support GeoCities`, sub: `Confirm ${feeAmount} ${token} tip…` });
+                        try {
+                            const feeHash = await sendToken(GEOCITIES_FEE_RECIPIENT, feeAmount, token);
+                            feeToast.update({ kind: 'success', sub: 'Thanks for the support!', txHash: feeHash, autoDismissMs: 10000 });
+                        } catch (feeErr) {
+                            console.warn('Fee tx skipped:', feeErr);
+                            feeToast.update({ kind: 'error', sub: _formatTxError(feeErr), autoDismissMs: 6000 });
+                        }
+                    }
+                }
             } catch (e) {
-                if (sendStatus) sendStatus.textContent = `Error: ${e.message || e}`;
+                console.error('Send failed:', e);
+                const friendly = _formatTxError(e);
+                if (sendStatus) sendStatus.textContent = friendly;
+                toast.update({ kind: 'error', sub: friendly, autoDismissMs: 8000 });
             } finally { sendBtn.disabled = false; }
         };
     }
@@ -2514,7 +2925,7 @@ function populateCryptoPanel(address, ensName) {
                 if (swapStatus) swapStatus.textContent = '';
                 if (execBtn) execBtn.style.display = 'block';
             } catch (e) {
-                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                if (swapStatus) swapStatus.textContent = _formatTxError(e);
                 _lastSwapQuote = null;
                 if (execBtn) execBtn.style.display = 'none';
             } finally { quoteBtn.disabled = false; }
@@ -2525,13 +2936,18 @@ function populateCryptoPanel(address, ensName) {
             if (!_lastSwapQuote) return;
             execBtn.disabled = true;
             if (swapStatus) swapStatus.textContent = 'Swapping…';
+            const q = _lastSwapQuote;
+            const toast = _txToast.add({ title: `Swap ${q.fromSym} \u2192 ${q.toSym}`, sub: 'Confirm in wallet\u2026' });
             try {
                 const txHash = await executeSwap(_lastSwapQuote);
                 if (swapStatus) swapStatus.textContent = `Swapped! Tx: ${txHash.slice(0,10)}…`;
                 if (execBtn) execBtn.style.display = 'none';
                 _lastSwapQuote = null;
+                toast.update({ kind: 'success', sub: 'Confirmed', txHash, autoDismissMs: 10000 });
             } catch (e) {
-                if (swapStatus) swapStatus.textContent = `Error: ${e.message || e}`;
+                const friendly = _formatTxError(e);
+                if (swapStatus) swapStatus.textContent = friendly;
+                toast.update({ kind: 'error', sub: friendly, autoDismissMs: 8000 });
                 execBtn.disabled = false;
             }
         };
@@ -2543,9 +2959,10 @@ function updateWalletUI() {
     const btn = document.getElementById('wallet-connect-btn');
     if (!btn) return;
     if (_connectedWallet) {
-        btn.textContent = `${_connectedWallet.slice(0, 6)}...${_connectedWallet.slice(-4)}`;
+        const addr = _connectedWallet.address;
+        btn.textContent = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
         const addrEl = document.getElementById('wallet-connected-address');
-        if (addrEl) addrEl.textContent = `${_connectedWallet.slice(0, 10)}...${_connectedWallet.slice(-6)}`;
+        if (addrEl) addrEl.textContent = `${addr.slice(0, 10)}...${addr.slice(-6)}`;
         const dropContent = document.getElementById('wallet-connect-content');
         if (dropContent) dropContent.style.display = '';
     } else {
@@ -2553,25 +2970,34 @@ function updateWalletUI() {
         const dropContent = document.getElementById('wallet-connect-content');
         if (dropContent) dropContent.style.display = 'none';
     }
+    if (_currentProfileAddress) _efpRefreshFollowButton(_currentProfileAddress);
 }
 
 // Open the wallet selection modal — uses EIP-6963, legacy injection, or mobile deep links
-function openWalletModal() {
+async function openWalletModal() {
     const modal = document.getElementById('wallet-modal');
     const list = document.getElementById('wallet-modal-list');
     if (!modal || !list) return;
 
-    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const dappUrl = window.location.href;
-    const dappHost = window.location.hostname + window.location.pathname;
+    document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
+    modal.classList.add('open');
 
-    // Mobile deep links — open dapp inside the wallet's in-app browser
-    const mobileLinks = {
-        'io.metamask':         `https://metamask.app.link/dapp/${dappHost}`,
-        'app.rainbow':         `https://rnbwapp.com/dapp?url=${encodeURIComponent(dappUrl)}`,
-        'xyz.coinbase.wallet': `https://go.cb-wallet.com/dapp?url=${encodeURIComponent(dappUrl)}`,
-        'com.trustwallet.app': `https://link.trustwallet.com/open_url?url=${encodeURIComponent(dappUrl)}`,
-    };
+    // Show a brief detection state and re-request EIP-6963 announcements —
+    // on mobile, injected providers sometimes announce after page load, so
+    // giving them a tick to respond avoids falsely falling through to deep links.
+    list.innerHTML = '<p class="wallet-modal-hint">Detecting wallets…</p>';
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+    await new Promise(r => setTimeout(r, 350));
+    _renderWalletModalList();
+}
+
+function _renderWalletModalList() {
+    const list = document.getElementById('wallet-modal-list');
+    if (!list) return;
+
+    const ua = navigator.userAgent || '';
+    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    const dappUrl = window.location.href;
 
     // Known wallet info for fallback detection / display
     const knownWallets = [
@@ -2581,6 +3007,11 @@ function openWalletModal() {
         { rdns: 'com.brave.wallet',    name: 'Brave Wallet',   icon: '🦁', test: p => p.isBraveWallet,                     installUrl: 'https://brave.com/wallet/' },
         { rdns: 'com.trustwallet.app', name: 'Trust Wallet',   icon: '🛡️', test: p => p.isTrust,                           installUrl: 'https://trustwallet.com/download' },
     ];
+
+    // Detect in-app wallet browser — window.ethereum injected by a mobile wallet.
+    const inAppInfo = (isMobile && window.ethereum)
+        ? knownWallets.find(w => w.test(window.ethereum)) || { name: 'Wallet Browser', icon: '📱', rdns: 'unknown' }
+        : null;
 
     list.innerHTML = '';
 
@@ -2598,55 +3029,83 @@ function openWalletModal() {
         list.appendChild(btn);
     };
 
-    const connectWith = async (provider) => {
+    const connectWith = async (provider, info) => {
         closeWalletModal();
         try {
             const accounts = await provider.request({ method: 'eth_requestAccounts' });
-            if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
+            if (accounts.length) {
+                _connectedWallet = { address: accounts[0], provider, info: info || null };
+                _attachProviderListeners(provider);
+                updateWalletUI();
+            }
         } catch (e) { console.warn('Wallet connect rejected:', e); }
     };
 
-    // 1. EIP-6963 providers (desktop extensions) — the most reliable detection
+    // 1. EIP-6963 providers — the canonical discovery channel
     for (const { info, provider } of _eip6963Providers) {
         const iconHtml = info.icon
             ? `<img src="${info.icon}" alt="${info.name}" style="width:100%;height:100%;object-fit:contain;">`
             : '🌐';
-        makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider));
+        makeRow(iconHtml, info.name, 'Detected', 'Connect', () => connectWith(provider, info));
     }
 
-    // 2. Legacy window.ethereum (for wallets that don't announce via EIP-6963)
-    if (_eip6963Providers.length === 0 && window.ethereum) {
+    // 2. In-app wallet browser — mobile user already has a wallet injected
+    if (inAppInfo && _eip6963Providers.length === 0) {
+        makeRow(inAppInfo.icon, inAppInfo.name, 'In-app browser', 'Connect',
+            () => connectWith(window.ethereum, { name: inAppInfo.name, rdns: inAppInfo.rdns }));
+    }
+
+    // 3. Desktop legacy injection (window.ethereum on non-mobile, no 6963 announcement)
+    if (_eip6963Providers.length === 0 && window.ethereum && !isMobile) {
         const legacyProviders = window.ethereum.providers || [window.ethereum];
         for (const p of legacyProviders) {
             const def = knownWallets.find(w => w.test(p));
             const icon = def ? def.icon : '🌐';
             const name = def ? def.name : 'Browser Wallet';
-            makeRow(icon, name, 'Detected', 'Connect', () => connectWith(p));
+            makeRow(icon, name, 'Detected', 'Connect', () => connectWith(p, def ? { name: def.name, rdns: def.rdns } : null));
         }
     }
 
-    // 3. Mobile deep links — when no injected wallets, let user open the dapp inside their wallet app
-    if (_eip6963Providers.length === 0 && !window.ethereum && isMobile) {
-        for (const w of knownWallets) {
-            const deepLink = mobileLinks[w.rdns];
-            if (!deepLink) continue;
-            makeRow(w.icon, w.name, 'Open in app', 'Open', () => {
-                closeWalletModal();
-                window.location.href = deepLink;
-            });
-        }
-        // Explain why we're showing open links
+    // 4. WalletConnect — universal path, covers every major wallet. Desktop gets
+    //    a QR code; mobile gets a wallet picker that uses WalletConnect's own
+    //    (maintained) deep-link scheme. Only shown when projectId is configured.
+    if (WALLETCONNECT_PROJECT_ID) {
+        const subtext = isMobile ? 'Open any wallet app' : 'Scan QR with any wallet';
+        makeRow('🔌', 'WalletConnect', subtext, 'Connect', _connectWalletConnect);
+    }
+
+    // 5. Mobile with no injected wallet — copy-URL fallback (always available as a
+    //    backup in case WalletConnect isn't configured or doesn't work for the user's wallet).
+    if (isMobile && !inAppInfo && _eip6963Providers.length === 0) {
+        makeRow('🔗', 'Copy page link', 'Paste into your wallet\'s built-in browser', 'Copy', async () => {
+            try {
+                await navigator.clipboard.writeText(dappUrl);
+                const hint = document.createElement('p');
+                hint.className = 'wallet-modal-hint';
+                hint.textContent = 'Link copied. Open your wallet app, go to its browser tab, and paste.';
+                list.appendChild(hint);
+            } catch {
+                // clipboard may be blocked — show the URL for manual selection
+                const pre = document.createElement('textarea');
+                pre.className = 'wallet-modal-copy-fallback';
+                pre.readOnly = true;
+                pre.value = dappUrl;
+                list.appendChild(pre);
+                pre.select();
+            }
+        });
         const note = document.createElement('p');
-        note.style.cssText = 'font-size:0.72em;opacity:0.5;text-align:center;padding:10px 16px 4px;margin:0;line-height:1.5;';
-        note.textContent = 'Tapping "Open" loads this page inside your wallet\'s browser where you can connect.';
+        note.className = 'wallet-modal-hint';
+        note.textContent = 'To connect a mobile wallet: open MetaMask, Rainbow, Coinbase Wallet, or Trust, use its built-in browser, and paste this page\'s link.';
         list.appendChild(note);
     }
 
-    // 4. Desktop install options (always shown when wallet not detected on desktop)
+    // 6. Desktop install options
     if (!isMobile) {
         const eip6963Rdns = new Set(_eip6963Providers.map(p => p.info.rdns));
+        const hasLegacy = window.ethereum && knownWallets.find(k => k.test(window.ethereum));
         for (const w of knownWallets) {
-            if (!eip6963Rdns.has(w.rdns) && !(window.ethereum && knownWallets.find(k => k.test(window.ethereum)))) {
+            if (!eip6963Rdns.has(w.rdns) && !hasLegacy) {
                 makeRow(w.icon, w.name, 'Not installed', 'Get', () => {
                     window.open(w.installUrl, '_blank', 'noopener,noreferrer');
                     closeWalletModal();
@@ -2656,18 +3115,13 @@ function openWalletModal() {
     }
 
     if (list.children.length === 0) {
-        list.innerHTML = '<p style="padding:16px;text-align:center;opacity:0.5;font-size:0.85em;">No wallets detected.<br>Install a wallet extension to continue.</p>';
+        list.innerHTML = '<p class="wallet-modal-hint">No wallets detected. Install a wallet extension to continue.</p>';
     }
-
-    document.querySelectorAll('.dropdown-content.show').forEach(d => d.classList.remove('show'));
-    modal.classList.add('open');
 }
 
 function closeWalletModal() {
     document.getElementById('wallet-modal')?.classList.remove('open');
 }
-
-let _walletListenerAdded = false;
 
 // Wire up the wallet connect button interactions
 function initWalletConnect() {
@@ -2688,10 +3142,17 @@ function initWalletConnect() {
 
     const disconnectBtn = document.getElementById('wallet-disconnect-btn');
     if (disconnectBtn) {
-        disconnectBtn.addEventListener('click', () => {
+        disconnectBtn.addEventListener('click', async () => {
+            const wasWc = !!(_wcProvider && _connectedWallet?.provider === _wcProvider);
+            _detachProviderListeners(_connectedWallet?.provider);
             _connectedWallet = null;
             updateWalletUI();
             document.getElementById('wallet-connect-content')?.classList.remove('show');
+            // End the WC session on the wallet side too — otherwise the wallet
+            // still thinks it's paired and won't prompt next time.
+            if (wasWc) {
+                try { await _wcProvider.disconnect(); } catch (e) { console.warn('WC disconnect:', e); }
+            }
         });
     }
 
@@ -2702,14 +3163,31 @@ function initWalletConnect() {
         document.getElementById('wallet-modal-close')?.addEventListener('click', closeWalletModal);
         modal.addEventListener('click', e => { if (e.target === modal) closeWalletModal(); });
     }
+}
 
-    if (!_walletListenerAdded && window.ethereum) {
-        _walletListenerAdded = true;
-        window.ethereum.on('accountsChanged', accounts => {
-            _connectedWallet = accounts.length ? accounts[0] : null;
-            updateWalletUI();
-        });
-    }
+// accountsChanged / chainChanged are attached to the *chosen* provider so the
+// UI only reacts to the wallet the user actually connected.
+const _providerListeners = new WeakMap();
+function _attachProviderListeners(provider) {
+    if (!provider || _providerListeners.has(provider)) return;
+    const onAccounts = accounts => {
+        if (!_connectedWallet || _connectedWallet.provider !== provider) return;
+        if (accounts.length) _connectedWallet.address = accounts[0];
+        else _connectedWallet = null;
+        updateWalletUI();
+    };
+    const onChain = () => updateWalletUI();
+    provider.on?.('accountsChanged', onAccounts);
+    provider.on?.('chainChanged', onChain);
+    _providerListeners.set(provider, { onAccounts, onChain });
+}
+function _detachProviderListeners(provider) {
+    if (!provider) return;
+    const refs = _providerListeners.get(provider);
+    if (!refs) return;
+    provider.removeListener?.('accountsChanged', refs.onAccounts);
+    provider.removeListener?.('chainChanged', refs.onChain);
+    _providerListeners.delete(provider);
 }
 
 // ===== ABI helpers for ENS setText =====
@@ -2755,13 +3233,33 @@ async function openEditRecordsModal() {
         { key: 'avatar',       label: 'Avatar URL',   value: p.avatar || '' },
     ];
 
-    body.innerHTML = fields.map(f => `
-        <div class="edit-field">
-            <label>${f.label}</label>
-            ${f.multiline
-                ? `<textarea data-key="${f.key}">${_escapeHtml(f.value)}</textarea>`
-                : `<input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}">`}
-        </div>`).join('');
+    const primaryBannerId = 'primary-name-banner';
+    body.innerHTML =
+        `<div id="${primaryBannerId}" class="primary-name-banner" style="display:none;"></div>` +
+        fields.map(f => {
+            if (f.key === 'avatar') {
+                return `
+                    <div class="edit-field">
+                        <label>${f.label}</label>
+                        <div class="avatar-field-row">
+                            <input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}" placeholder="ipfs://… or https://…" style="flex:1;">
+                            <button type="button" class="dropdown-button avatar-upload-btn" id="avatar-upload-btn">Upload</button>
+                        </div>
+                        <input type="file" id="avatar-upload-file" accept="image/*" style="display:none;">
+                        <div id="avatar-upload-status" class="crypto-status" style="font-size:0.78em;"></div>
+                    </div>`;
+            }
+            return `
+                <div class="edit-field">
+                    <label>${f.label}</label>
+                    ${f.multiline
+                        ? `<textarea data-key="${f.key}">${_escapeHtml(f.value)}</textarea>`
+                        : `<input type="text" data-key="${f.key}" value="${_escapeAttr(f.value)}">`}
+                </div>`;
+        }).join('');
+
+    _renderPrimaryNameBanner(primaryBannerId);
+    _wireAvatarUpload();
 
     const saveBtn = document.getElementById('edit-modal-save');
     if (saveBtn) saveBtn.onclick = () => _saveRecords(fields);
@@ -2793,6 +3291,7 @@ async function _saveRecords(originalFields) {
     }
 
     try {
+        await _ensureChain('0x1');
         const nhBytes = _ensNamehash(ensName);
         const nhHex = _toHex(nhBytes);
         const resolverResult = await _ethCall('0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e', '0x0178b8bf' + nhHex);
@@ -2800,13 +3299,22 @@ async function _saveRecords(originalFields) {
         const resolver = '0x' + resolverResult.slice(-40);
         if (/^0x0+$/.test(resolver)) throw new Error('Zero resolver');
 
-        for (let i = 0; i < changes.length; i++) {
-            if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
-            const { key, value } = changes[i];
-            await window.ethereum.request({
-                method: 'eth_sendTransaction',
-                params: [{ from: _connectedWallet, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
-            });
+        const toast = _txToast.add({ title: `Update ${ensName} records`, sub: `${changes.length} record${changes.length === 1 ? '' : 's'} to set` });
+        try {
+            for (let i = 0; i < changes.length; i++) {
+                if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
+                const { key, value } = changes[i];
+                toast.update({ sub: `Confirm ${key} (${i + 1}/${changes.length})…` });
+                const txHash = await _getWalletProvider().request({
+                    method: 'eth_sendTransaction',
+                    params: [{ from: _connectedWallet.address, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
+                });
+                toast.update({ sub: `Sent ${key} (${i + 1}/${changes.length})`, txHash });
+            }
+            toast.update({ kind: 'success', sub: 'All records updated', autoDismissMs: 10000 });
+        } catch (txErr) {
+            toast.update({ kind: 'error', sub: _formatTxError(txErr), autoDismissMs: 8000 });
+            throw txErr;
         }
         if (saveBtn) saveBtn.textContent = 'Saved!';
         setTimeout(() => {
@@ -2815,8 +3323,174 @@ async function _saveRecords(originalFields) {
         }, 2000);
     } catch (e) {
         console.error('Save records failed:', e);
-        if (saveBtn) { saveBtn.textContent = 'Error — retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 3000); }
+        if (saveBtn) { saveBtn.textContent = 'Retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 4000); }
+        const body = document.getElementById('edit-modal-body');
+        if (body) {
+            let errEl = body.querySelector('.edit-modal-error');
+            if (!errEl) {
+                errEl = document.createElement('div');
+                errEl.className = 'edit-modal-error crypto-status';
+                body.appendChild(errEl);
+            }
+            errEl.textContent = _formatTxError(e);
+        }
     }
+}
+
+// ─── ENS Primary Name (reverse record) ────────────────────────────────────────
+
+async function _getCurrentPrimaryName(userAddress) {
+    try {
+        const addrLower = userAddress.toLowerCase().replace(/^0x/, '');
+        const reverseNode = _ensNamehash(`${addrLower}.addr.reverse`);
+        const reverseNodeHex = _toHex(reverseNode);
+        // Call resolver for the reverse node
+        const resolverCall = await _ethCall('0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e', '0x0178b8bf' + reverseNodeHex);
+        if (!resolverCall || resolverCall.length < 42) return '';
+        const resolver = '0x' + resolverCall.slice(-40);
+        if (/^0x0+$/.test(resolver)) return '';
+        // name(bytes32) selector 0x691f3431
+        const nameCall = await _ethCall(resolver, '0x691f3431' + reverseNodeHex);
+        if (!nameCall || nameCall.length < 130) return '';
+        const lenHex = nameCall.slice(66, 130);
+        const strLen = parseInt(lenHex, 16);
+        if (!strLen) return '';
+        const strHex = nameCall.slice(130, 130 + strLen * 2);
+        let out = '';
+        for (let i = 0; i < strHex.length; i += 2) out += String.fromCharCode(parseInt(strHex.substr(i, 2), 16));
+        return out;
+    } catch (e) {
+        console.warn('Primary name lookup failed:', e);
+        return '';
+    }
+}
+
+async function _renderPrimaryNameBanner(bannerId) {
+    const banner = document.getElementById(bannerId);
+    if (!banner || !_connectedWallet) return;
+    const ensName = _currentProfileEnsName;
+    if (!ensName || ensName.endsWith('.base.eth')) return;
+
+    banner.style.display = 'block';
+    banner.innerHTML = '<span style="opacity:0.6;">Checking primary name…</span>';
+
+    const current = await _getCurrentPrimaryName(_connectedWallet.address);
+    if (current && current.toLowerCase() === ensName.toLowerCase()) {
+        banner.innerHTML = `<span class="primary-name-check">✓</span> <strong>${ensName}</strong> is your primary name`;
+        banner.classList.add('is-primary');
+        return;
+    }
+    banner.classList.remove('is-primary');
+    banner.innerHTML = `
+        <div class="primary-name-text">
+            ${current ? `Primary name: <strong>${current}</strong>` : 'No primary name set.'}
+        </div>
+        <button type="button" class="dropdown-button primary-name-btn">Set ${ensName} as primary</button>
+    `;
+    banner.querySelector('.primary-name-btn').onclick = () => _setPrimaryName(ensName, bannerId);
+}
+
+async function _setPrimaryName(ensName, bannerId) {
+    if (!_connectedWallet) { openWalletModal(); return; }
+    const banner = document.getElementById(bannerId);
+    const btn = banner?.querySelector('.primary-name-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Confirm in wallet…'; }
+
+    const toast = _txToast.add({ title: `Set primary: ${ensName}`, sub: 'Confirm in wallet\u2026' });
+    try {
+        await _ensureChain('0x1');
+        // setName(string) selector 0xc47f0027 + dynamic string encoding
+        const nameBytes = new TextEncoder().encode(ensName);
+        const nameHex = Array.from(nameBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        const paddedNameHex = nameHex.padEnd(Math.ceil(nameHex.length / 64) * 64, '0');
+        const offsetHex = '0000000000000000000000000000000000000000000000000000000000000020';
+        const lenHex = nameBytes.length.toString(16).padStart(64, '0');
+        const calldata = '0xc47f0027' + offsetHex + lenHex + paddedNameHex;
+
+        const txHash = await _getWalletProvider().request({
+            method: 'eth_sendTransaction',
+            params: [{ from: _connectedWallet.address, to: ENS_REVERSE_REGISTRAR, data: calldata }]
+        });
+        toast.update({ kind: 'success', sub: 'Submitted — confirming', txHash, autoDismissMs: 10000 });
+        if (btn) btn.textContent = 'Submitted…';
+        setTimeout(() => _renderPrimaryNameBanner(bannerId), 8000);
+    } catch (e) {
+        console.error('Set primary failed:', e);
+        toast.update({ kind: 'error', sub: _formatTxError(e), autoDismissMs: 8000 });
+        if (btn) { btn.disabled = false; btn.textContent = `Set ${ensName} as primary`; }
+    }
+}
+
+// ─── Avatar upload to IPFS via Pinata ─────────────────────────────────────────
+
+const _PINATA_JWT_KEY = 'geocities-pinata-jwt';
+
+async function _pinFileToIPFS(file, jwt, name) {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'upload');
+    if (name) formData.append('pinataMetadata', JSON.stringify({ name }));
+    const resp = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}` },
+        body: formData
+    });
+    if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(`Pinata error ${resp.status}: ${err}`);
+    }
+    const data = await resp.json();
+    return data.IpfsHash;
+}
+
+function _wireAvatarUpload() {
+    const btn = document.getElementById('avatar-upload-btn');
+    const fileInput = document.getElementById('avatar-upload-file');
+    const statusEl = document.getElementById('avatar-upload-status');
+    const urlInput = document.querySelector('[data-key="avatar"]');
+    if (!btn || !fileInput || !urlInput) return;
+
+    const setStatus = (msg, isErr) => {
+        if (!statusEl) return;
+        statusEl.textContent = msg || '';
+        statusEl.style.color = isErr ? '#c62828' : '';
+    };
+
+    btn.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) { setStatus('Please choose an image file.', true); return; }
+        if (file.size > 5 * 1024 * 1024) { setStatus('Image must be under 5 MB.', true); return; }
+
+        let jwt = localStorage.getItem(_PINATA_JWT_KEY) || '';
+        if (!jwt) {
+            jwt = prompt('Paste your Pinata JWT (get one free at pinata.cloud). Stored only in this browser.') || '';
+            if (!jwt) { setStatus('Upload cancelled.'); return; }
+            try { localStorage.setItem(_PINATA_JWT_KEY, jwt); } catch {}
+        }
+
+        btn.disabled = true;
+        setStatus('Uploading to IPFS…');
+        try {
+            const cid = await _pinFileToIPFS(file, jwt, `geocities-avatar-${_currentProfileEnsName || 'unknown'}`);
+            urlInput.value = `ipfs://${cid}`;
+            urlInput.dispatchEvent(new Event('input', { bubbles: true }));
+            setStatus(`Uploaded. Save changes to publish.`);
+        } catch (e) {
+            console.error('Avatar upload failed:', e);
+            const msg = String(e?.message || e);
+            if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
+                try { localStorage.removeItem(_PINATA_JWT_KEY); } catch {}
+                setStatus('Pinata auth failed. Click Upload again to re-enter your JWT.', true);
+            } else {
+                setStatus(msg, true);
+            }
+        } finally {
+            btn.disabled = false;
+            fileInput.value = '';
+        }
+    });
 }
 
 // Function to update the navigation bar based on the current view
@@ -2936,7 +3610,10 @@ function displayUnregisteredProfile(ensName) {
     const numberRecords = document.querySelector('.profile-number-records');
     const headerImage = document.querySelector('.profile-header-image');
     const controlButtons = document.querySelectorAll('.control-button');
-    
+
+    // Sync URL so the "register this name" page is shareable too.
+    _pushProfileUrl(ensName);
+
     // Scroll to top of the page for better UX
     window.scrollTo({
         top: 0,
@@ -3012,17 +3689,54 @@ function displayUnregisteredProfile(ensName) {
     const registerButton = document.createElement('button');
     registerButton.className = 'register-button dropdown-button';
 
+    registerContainer.innerHTML = '';
+
     if (isBasename) {
         const basenameWithoutSuffix = ensName.replace('.base.eth', '');
         registerButton.textContent = 'Register Basename';
         registerButton.onclick = () => window.open(`https://www.base.org/names?claim=${basenameWithoutSuffix}`, '_blank', 'noopener,noreferrer');
+        registerContainer.appendChild(registerButton);
     } else {
-        registerButton.textContent = 'Register ENS';
-        registerButton.onclick = () => openRegisterModal(ensName);
-    }
+        const label = ensName.replace(/\.eth$/, '');
+        const availabilityEl = document.createElement('div');
+        availabilityEl.className = 'register-availability-inline';
+        availabilityEl.textContent = 'Checking availability…';
+        registerContainer.appendChild(availabilityEl);
 
-    registerContainer.innerHTML = '';
-    registerContainer.appendChild(registerButton);
+        registerButton.textContent = 'Register ENS';
+        registerButton.disabled = true;
+        registerButton.onclick = () => openRegisterModal(ensName);
+        registerContainer.appendChild(registerButton);
+
+        (async () => {
+            try {
+                if (label.length < 3) {
+                    availabilityEl.textContent = 'Names must be at least 3 characters.';
+                    availabilityEl.classList.add('unavailable');
+                    return;
+                }
+                const provider = _getReadProvider();
+                const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, provider);
+                const available = await registrar.available(label);
+                if (!available) {
+                    availabilityEl.textContent = `${ensName} is already registered.`;
+                    availabilityEl.classList.add('unavailable');
+                    return;
+                }
+                const YEAR_SECS = 365 * 24 * 3600;
+                const price = await registrar.rentPrice(label, YEAR_SECS);
+                const totalWei = price.base.add(price.premium);
+                const totalEth = parseFloat(ethers.utils.formatEther(totalWei)).toFixed(4);
+                availabilityEl.innerHTML = `<span class="avail-dot">✓</span> <strong>${ensName}</strong> is available · ~${totalEth} ETH / year`;
+                availabilityEl.classList.add('available');
+                registerButton.disabled = false;
+            } catch (e) {
+                console.error('Availability check failed:', e);
+                availabilityEl.textContent = 'Could not check availability. Try registering below.';
+                registerButton.disabled = false;
+            }
+        })();
+    }
     
     // Hide download, deploy, and connect buttons
     const downloadContainer = document.querySelector('.download-website-container');
@@ -3246,10 +3960,12 @@ function setupNavLogoClickHandler() {
     const newNavLogo = navLogo.cloneNode(true);
     navLogo.parentNode.replaceChild(newNavLogo, navLogo);
     
-    // Add the click handler
+    // Add the click handler — navigate home via the router so the URL clears
+    // and the homepage shows without losing wallet state to a full reload.
     newNavLogo.addEventListener('click', (e) => {
         e.preventDefault();
-        window.location.reload(); // Refresh the page
+        _pushHomeUrl();
+        _showHomepage();
     });
 }
 
@@ -4157,7 +4873,9 @@ function initializeCyclingWords() {
 // ─── ethers.js helpers ───────────────────────────────────────────────────────
 
 function _getProvider() {
-    return new ethers.providers.Web3Provider(window.ethereum);
+    const eip1193 = _getWalletProvider();
+    if (!eip1193) throw new Error('No wallet connected');
+    return new ethers.providers.Web3Provider(eip1193);
 }
 
 function _getReadProvider() {
@@ -4182,7 +4900,7 @@ async function resolveRecipient(input) {
 // ─── Send crypto ─────────────────────────────────────────────────────────────
 
 async function sendToken(toInput, amount, tokenSymbol) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const to = await resolveRecipient(toInput);
     const token = TOKENS[tokenSymbol];
@@ -4215,7 +4933,8 @@ function _paraswapAddr(sym) {
 }
 
 async function getSwapQuote(fromSym, toSym, amount) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
+    await _ensureChain('0x1');
     const provider = _getProvider();
     const accounts = await provider.listAccounts();
     if (!accounts.length) throw new Error('Connect wallet first');
@@ -4227,7 +4946,10 @@ async function getSwapQuote(fromSym, toSym, amount) {
     const destDecimals = TOKENS[toSym]?.decimals || 18;
     const srcAmount = ethers.utils.parseUnits(amount, srcDecimals).toString();
 
-    const url = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${srcAmount}&srcDecimals=${srcDecimals}&destDecimals=${destDecimals}&side=SELL&network=1&userAddress=${userAddr}`;
+    const partnerParams = PARASWAP_PARTNER_ADDRESS
+        ? `&partner=${PARASWAP_PARTNER}&partnerAddress=${PARASWAP_PARTNER_ADDRESS}&partnerFeeBps=${PARASWAP_PARTNER_FEE_BPS}&takeSurplus=true`
+        : `&partner=${PARASWAP_PARTNER}`;
+    const url = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${srcAmount}&srcDecimals=${srcDecimals}&destDecimals=${destDecimals}&side=SELL&network=1&userAddress=${userAddr}${partnerParams}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`ParaSwap error: ${resp.status}`);
     const data = await resp.json();
@@ -4238,19 +4960,27 @@ async function getSwapQuote(fromSym, toSym, amount) {
 }
 
 async function executeSwap(quote) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
+    await _ensureChain('0x1');
     const signer = await _getSigner();
     const userAddr = quote.userAddr;
 
+    const txBody = {
+        srcToken: quote.srcToken, destToken: quote.destToken,
+        srcAmount: quote.srcAmount, destAmount: quote.priceRoute.destAmount,
+        priceRoute: quote.priceRoute, userAddress: userAddr,
+        slippage: 100, srcDecimals: quote.srcDecimals, destDecimals: quote.destDecimals,
+        partner: PARASWAP_PARTNER
+    };
+    if (PARASWAP_PARTNER_ADDRESS) {
+        txBody.partnerAddress = PARASWAP_PARTNER_ADDRESS;
+        txBody.partnerFeeBps = PARASWAP_PARTNER_FEE_BPS;
+        txBody.takeSurplus = true;
+    }
     const txResp = await fetch(`https://apiv5.paraswap.io/transactions/1?ignoreChecks=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            srcToken: quote.srcToken, destToken: quote.destToken,
-            srcAmount: quote.srcAmount, destAmount: quote.priceRoute.destAmount,
-            priceRoute: quote.priceRoute, userAddress: userAddr,
-            slippage: 100, srcDecimals: quote.srcDecimals, destDecimals: quote.destDecimals
-        })
+        body: JSON.stringify(txBody)
     });
     if (!txResp.ok) throw new Error(`ParaSwap tx error: ${txResp.status}`);
     const txData = await txResp.json();
@@ -4323,7 +5053,8 @@ async function openRegisterModal(ensName) {
         submitBtn.textContent = 'Register';
         submitBtn.onclick = () => _executeRegistration(label, ensName, totalWei);
     } catch (e) {
-        body.innerHTML = `<div class="register-availability">Error: ${e.message || e}</div>`;
+        console.error('Register availability check failed:', e);
+        body.innerHTML = `<div class="register-availability">${_formatTxError(e)}</div>`;
     }
 
     document.getElementById('register-modal-close').onclick = () => { modal.style.display = 'none'; };
@@ -4331,13 +5062,15 @@ async function openRegisterModal(ensName) {
 }
 
 async function _executeRegistration(label, ensName, priceWei) {
-    if (!window.ethereum) { alert('Connect your wallet first.'); return; }
+    if (!_connectedWallet) { openWalletModal(); return; }
     const submitBtn = document.getElementById('register-submit-btn');
     const status = document.getElementById('reg-status');
     const setStatus = (msg) => { if (status) status.textContent = msg; };
 
     submitBtn.disabled = true;
+    const toast = _txToast.add({ title: `Register ${ensName}`, sub: 'Confirm commit\u2026' });
     try {
+        await _ensureChain('0x1');
         const signer = await _getSigner();
         const userAddr = await signer.getAddress();
         const registrar = new ethers.Contract(ENS_REGISTRAR, _REGISTRAR_ABI, signer);
@@ -4349,26 +5082,34 @@ async function _executeRegistration(label, ensName, priceWei) {
         setStatus('Sending commit transaction…');
         document.getElementById('reg-dot1').classList.add('done');
         const commitTx = await registrar.commit(commitment);
+        toast.update({ sub: 'Commit sent — waiting for confirmation', txHash: commitTx.hash });
         await commitTx.wait();
 
         document.getElementById('reg-step2').classList.remove('dim');
         setStatus('Waiting 60 seconds before registration…');
+        toast.update({ sub: 'Commit confirmed — waiting 60s (anti-frontrun delay)' });
         await new Promise(r => setTimeout(r, 62000));
 
         document.getElementById('reg-dot2').classList.add('done');
         document.getElementById('reg-step3').classList.remove('dim');
         setStatus('Sending register transaction…');
+        toast.update({ sub: 'Confirm register in wallet…' });
 
         // Add 10% buffer on price
         const value = priceWei.mul(110).div(100);
         const registerTx = await registrar.register(label, userAddr, YEAR_SECS, secret, ENS_PUBLIC_RESOLVER, [], false, 0, { value });
+        toast.update({ sub: 'Register sent — waiting for confirmation', txHash: registerTx.hash });
         await registerTx.wait();
 
         document.getElementById('reg-dot3').classList.add('done');
         setStatus(`${ensName} registered! Tx: ${registerTx.hash.slice(0,10)}…`);
+        toast.update({ kind: 'success', sub: `${ensName} is yours!`, txHash: registerTx.hash, autoDismissMs: 15000 });
         submitBtn.style.display = 'none';
     } catch (e) {
-        setStatus(`Error: ${e.message || e}`);
+        console.error('Register failed:', e);
+        const friendly = _formatTxError(e);
+        setStatus(friendly);
+        toast.update({ kind: 'error', sub: friendly, autoDismissMs: 10000 });
         submitBtn.disabled = false;
     }
 }
@@ -4456,22 +5197,30 @@ async function _runIPFSDeploy() {
             const connectLink = `https://app.ens.domains/${_currentProfileEnsName}`;
             status.innerHTML += `<br><a href="${connectLink}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;">Set contenthash on ENS ↗</a> or <button id="ipfs-set-contenthash-btn" class="dropdown-button" style="font-size:0.8em;padding:4px 10px;margin-top:6px;">Set via Wallet</button>`;
             document.getElementById('ipfs-set-contenthash-btn')?.addEventListener('click', async () => {
+                const toast = _txToast.add({ title: `Set contenthash for ${_currentProfileEnsName}`, sub: 'Confirm in wallet\u2026' });
                 try {
                     setStatus('Setting contenthash on ENS…');
                     const txHash = await _setContenthash(cid);
                     setStatus(`Done! Tx: ${txHash.slice(0,10)}…`);
-                } catch (e) { setStatus(`Error: ${e.message || e}`); }
+                    toast.update({ kind: 'success', sub: 'Site live on your ENS name', txHash, autoDismissMs: 12000 });
+                } catch (e) {
+                    console.error('Set contenthash failed:', e);
+                    const friendly = _formatTxError(e);
+                    setStatus(friendly);
+                    toast.update({ kind: 'error', sub: friendly, autoDismissMs: 8000 });
+                }
             });
         }
     } catch (e) {
-        setStatus(`Error: ${e.message || e}`);
+        console.error('IPFS deploy failed:', e);
+        setStatus(_formatTxError(e));
     } finally {
         deployBtn.disabled = false;
     }
 }
 
 async function _buildDeployHTML() {
-    const resp = await fetch('download-template.html');
+    const resp = await fetch('/download-template.html');
     if (!resp.ok) throw new Error('Could not load template');
     let html = await resp.text();
 
@@ -4497,7 +5246,8 @@ async function _buildDeployHTML() {
 }
 
 async function _setContenthash(cid) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_connectedWallet) throw new Error('No wallet connected');
+    await _ensureChain('0x1');
     const signer = await _getSigner();
     const ensNode = ethers.utils.namehash(_currentProfileEnsName);
     const contenthash = _cidToContenthash(cid);
@@ -4562,4 +5312,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Ensure the nav bar is in the correct initial state (no profile-specific buttons)
     // This call is crucial to ensure homepage loads without profile buttons.
     updateNavBar('home', false);
+
+    // Route from the initial URL. If it's /vitalik.eth (or /#/vitalik.eth, or
+    // /?name=vitalik.eth), open that profile. Otherwise the homepage stays up.
+    _routeFromUrl();
 });
