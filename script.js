@@ -82,6 +82,38 @@ let _currentProfileAddress = null;
 let _currentProfileEnsName = null;
 let _currentProfileData = null;
 let _connectedWallet = null;
+// The specific EIP-1193 provider the user picked in the wallet modal (issue #13).
+// All wallet requests/transactions go through this, not whichever wallet injected window.ethereum last.
+let _connectedProvider = null;
+let _connectedProviderListener = null;
+
+function _activeProvider() {
+    return _connectedProvider || window.ethereum || null;
+}
+
+// Ensure the wallet is on Ethereum mainnet before sending a transaction (issue #19).
+// Prompts wallet_switchEthereumChain; throws a user-facing error if the user declines.
+const MAINNET_CHAIN_ID = '0x1';
+async function _ensureMainnet(provider) {
+    provider = provider || _activeProvider();
+    if (!provider) throw new Error('No wallet connected');
+    const current = await provider.request({ method: 'eth_chainId' });
+    if (String(current).toLowerCase() === MAINNET_CHAIN_ID) return;
+    try {
+        await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MAINNET_CHAIN_ID }] });
+    } catch (err) {
+        const e = new Error('Please switch your wallet to Ethereum Mainnet to continue.');
+        e.code = 'WRONG_CHAIN';
+        e.cause = err;
+        throw e;
+    }
+    const after = await provider.request({ method: 'eth_chainId' });
+    if (String(after).toLowerCase() !== MAINNET_CHAIN_ID) {
+        const e = new Error('Please switch your wallet to Ethereum Mainnet to continue.');
+        e.code = 'WRONG_CHAIN';
+        throw e;
+    }
+}
 
 // ENS on-chain fetch helpers (Keccak-256 + resolver calls via Cloudflare gateway)
 
@@ -2371,13 +2403,24 @@ async function _efpFollow(targetAddress, targetEnsName) {
 
     try {
         // 1. Get connected user's primary list from EFP API
+        if (!_connectedWallet || !_activeProvider()) {
+            setFollowBtn('Follow', false);
+            alert('Connect your wallet first to follow on-chain.');
+            return;
+        }
         const listResp = await fetch(`https://api.ethfollow.xyz/api/v1/users/${_connectedWallet}/primary-list`);
-        if (!listResp.ok) throw new Error('no primary list');
-        const listData = await listResp.json();
+        const listData = listResp.ok ? await listResp.json().catch(() => ({})) : {};
 
         // Extract token ID and storage location info from API response
-        const tokenId = listData.primary_list || listData.token_id || listData.list;
-        if (!tokenId && tokenId !== 0) throw new Error('no primary list token');
+        const tokenId = listData.primary_list ?? listData.token_id ?? listData.list;
+        if (tokenId === undefined || tokenId === null || tokenId === '') {
+            // Issue #23: no EFP list yet — tell the user instead of failing silently.
+            setFollowBtn('Follow', false);
+            if (confirm('Your wallet does not have an EFP follow list yet. Open efp.app to create one and follow ' + (targetEnsName || targetAddress) + '?')) {
+                window.open(`https://efp.app/${targetEnsName || targetAddress}`, '_blank', 'noopener,noreferrer');
+            }
+            return;
+        }
 
         // 2. Get list storage location (chainId, contract, nonce/slot)
         // Try EFP API first, then fallback to contract call
@@ -2405,7 +2448,9 @@ async function _efpFollow(targetAddress, targetEnsName) {
         const bytesLen = '0000000000000000000000000000000000000000000000000000000000000018'; // 24
         const calldata = '0x5aaf83db' + slotHex + bytesOffset + bytesLen + opPadded;
 
-        await window.ethereum.request({
+        const efpProvider = _activeProvider();
+        await _ensureMainnet(efpProvider);
+        await efpProvider.request({
             method: 'eth_sendTransaction',
             params: [{ from: _connectedWallet, to: listContract, data: calldata }]
         });
@@ -2413,8 +2458,12 @@ async function _efpFollow(targetAddress, targetEnsName) {
         setFollowBtn('Following!', false);
         setTimeout(() => setFollowBtn('Follow', false), 3000);
     } catch (e) {
-        console.warn('EFP on-chain follow failed, opening efp.app:', e);
         setFollowBtn('Follow', false);
+        if (e && (e.code === 'WRONG_CHAIN' || e.code === 4001)) {
+            if (e.code === 'WRONG_CHAIN') alert(e.message);
+            return;
+        }
+        console.warn('EFP on-chain follow failed, opening efp.app:', e);
         window.open(`https://efp.app/${targetEnsName || targetAddress}`, '_blank', 'noopener,noreferrer');
     }
 }
@@ -2602,7 +2651,11 @@ function openWalletModal() {
         closeWalletModal();
         try {
             const accounts = await provider.request({ method: 'eth_requestAccounts' });
-            if (accounts.length) { _connectedWallet = accounts[0]; updateWalletUI(); }
+            if (accounts.length) {
+                _connectedWallet = accounts[0];
+                _setConnectedProvider(provider);
+                updateWalletUI();
+            }
         } catch (e) { console.warn('Wallet connect rejected:', e); }
     };
 
@@ -2690,6 +2743,7 @@ function initWalletConnect() {
     if (disconnectBtn) {
         disconnectBtn.addEventListener('click', () => {
             _connectedWallet = null;
+            _setConnectedProvider(null);
             updateWalletUI();
             document.getElementById('wallet-connect-content')?.classList.remove('show');
         });
@@ -2703,12 +2757,31 @@ function initWalletConnect() {
         modal.addEventListener('click', e => { if (e.target === modal) closeWalletModal(); });
     }
 
-    if (!_walletListenerAdded && window.ethereum) {
+    if (!_walletListenerAdded && window.ethereum && !_connectedProvider) {
         _walletListenerAdded = true;
-        window.ethereum.on('accountsChanged', accounts => {
+        window.ethereum.on?.('accountsChanged', accounts => {
+            // Only follow window.ethereum when the user hasn't picked a specific wallet
+            if (_connectedProvider && _connectedProvider !== window.ethereum) return;
             _connectedWallet = accounts.length ? accounts[0] : null;
             updateWalletUI();
         });
+    }
+}
+
+// Remember the chosen provider and listen for account changes on *that* wallet (issue #13)
+function _setConnectedProvider(provider) {
+    if (_connectedProvider && _connectedProviderListener && _connectedProvider.removeListener) {
+        try { _connectedProvider.removeListener('accountsChanged', _connectedProviderListener); } catch (_) {}
+    }
+    _connectedProvider = provider || null;
+    _connectedProviderListener = null;
+    if (_connectedProvider && _connectedProvider.on && _connectedProvider !== window.ethereum) {
+        _connectedProviderListener = (accounts) => {
+            _connectedWallet = accounts && accounts.length ? accounts[0] : null;
+            if (!_connectedWallet) _setConnectedProvider(null);
+            updateWalletUI();
+        };
+        _connectedProvider.on('accountsChanged', _connectedProviderListener);
     }
 }
 
@@ -2803,7 +2876,8 @@ async function _saveRecords(originalFields) {
         for (let i = 0; i < changes.length; i++) {
             if (saveBtn) saveBtn.textContent = `Saving ${i + 1} / ${changes.length}…`;
             const { key, value } = changes[i];
-            await window.ethereum.request({
+            if (i === 0) await _ensureMainnet();
+            await _activeProvider().request({
                 method: 'eth_sendTransaction',
                 params: [{ from: _connectedWallet, to: resolver, data: _abiEncodeSetText(nhHex, key, value) }]
             });
@@ -2815,6 +2889,7 @@ async function _saveRecords(originalFields) {
         }, 2000);
     } catch (e) {
         console.error('Save records failed:', e);
+        if (e && e.code === 'WRONG_CHAIN') alert(e.message);
         if (saveBtn) { saveBtn.textContent = 'Error — retry'; setTimeout(() => { saveBtn.textContent = 'Save Changes'; }, 3000); }
     }
 }
@@ -4157,7 +4232,7 @@ function initializeCyclingWords() {
 // ─── ethers.js helpers ───────────────────────────────────────────────────────
 
 function _getProvider() {
-    return new ethers.providers.Web3Provider(window.ethereum);
+    return new ethers.providers.Web3Provider(_activeProvider(), 'any');
 }
 
 function _getReadProvider() {
@@ -4167,6 +4242,8 @@ function _getReadProvider() {
 async function _getSigner() {
     const provider = _getProvider();
     await provider.send('eth_requestAccounts', []);
+    // All signer-based actions (send, swap, ENS registration, contenthash) are mainnet-only (issue #19)
+    await _ensureMainnet();
     return provider.getSigner();
 }
 
@@ -4182,7 +4259,7 @@ async function resolveRecipient(input) {
 // ─── Send crypto ─────────────────────────────────────────────────────────────
 
 async function sendToken(toInput, amount, tokenSymbol) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_activeProvider()) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const to = await resolveRecipient(toInput);
     const token = TOKENS[tokenSymbol];
@@ -4215,7 +4292,7 @@ function _paraswapAddr(sym) {
 }
 
 async function getSwapQuote(fromSym, toSym, amount) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_activeProvider()) throw new Error('No wallet connected');
     const provider = _getProvider();
     const accounts = await provider.listAccounts();
     if (!accounts.length) throw new Error('Connect wallet first');
@@ -4238,7 +4315,7 @@ async function getSwapQuote(fromSym, toSym, amount) {
 }
 
 async function executeSwap(quote) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_activeProvider()) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const userAddr = quote.userAddr;
 
@@ -4331,7 +4408,7 @@ async function openRegisterModal(ensName) {
 }
 
 async function _executeRegistration(label, ensName, priceWei) {
-    if (!window.ethereum) { alert('Connect your wallet first.'); return; }
+    if (!_activeProvider()) { alert('Connect your wallet first.'); return; }
     const submitBtn = document.getElementById('register-submit-btn');
     const status = document.getElementById('reg-status');
     const setStatus = (msg) => { if (status) status.textContent = msg; };
@@ -4497,7 +4574,7 @@ async function _buildDeployHTML() {
 }
 
 async function _setContenthash(cid) {
-    if (!window.ethereum) throw new Error('No wallet connected');
+    if (!_activeProvider()) throw new Error('No wallet connected');
     const signer = await _getSigner();
     const ensNode = ethers.utils.namehash(_currentProfileEnsName);
     const contenthash = _cidToContenthash(cid);
